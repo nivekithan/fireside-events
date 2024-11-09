@@ -1,0 +1,16 @@
+{
+  "name": "fireside-events",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "turbo dev --ui tui"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@9.1.1",
+  "devDependencies": {
+    "turbo": "^2.2.3"
+  }
+}
