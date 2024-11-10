@@ -1,0 +1,1 @@
+2024-11-09T10:17:13.699613Z  WARN turborepo_filewatch: encountered error watching filesystem enumerating recursive watch: IO error for operation on /home/nivekithan/code/fireside-events/node_modules/.pnpm/supports-color@9.4.0/node_modules/supports-color_tmp_19076: No such file or directory (os error 2)
