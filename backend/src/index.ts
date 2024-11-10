@@ -1,5 +1,5 @@
+import { app } from "./server";
+
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response("Hello World!");
-	},
+	fetch: app.fetch,
 } satisfies ExportedHandler<Env>;

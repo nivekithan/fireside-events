@@ -106,6 +106,7 @@ export function LocalVideo(props: ComponentProps<"video">) {
 
     console.log("Setting localStream to localVideo srcObject");
     localVideoRef.current.srcObject = localStream;
+    localVideoRef.current.muted = true;
   }, [localStream]);
 
   return <video playsInline autoPlay {...props} ref={localVideoRef} />;
