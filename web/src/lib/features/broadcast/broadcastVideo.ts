@@ -1,4 +1,4 @@
-import { BkClient, bkClient } from "../backend";
+import { BkClient, bkClient } from "../../backend";
 
 export async function broadcastMediaStream(
   mediaStream: MediaStream,

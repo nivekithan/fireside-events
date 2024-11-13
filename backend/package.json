@@ -22,6 +22,7 @@
 		"@hono/zod-validator": "^0.4.1",
 		"hono": "^4.6.9",
 		"openapi-fetch": "^0.13.0",
+		"partyserver": "^0.0.57",
 		"zod": "^3.23.8"
 	},
 	"exports": {

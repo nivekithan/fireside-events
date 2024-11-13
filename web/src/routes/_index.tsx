@@ -1,12 +1,22 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { initalizeEventRoomPartySocket } from "@/lib/features/broadcast/eventRoom";
 import {
   LocalVideo,
   PromptUserForMediaPermission,
   useMediaPermissionState,
 } from "@/lib/features/localMedia";
-import React from "react";
+import { globalState } from "@/lib/globalState";
+import { useSelector } from "@xstate/store/react";
+import React, { useEffect } from "react";
 
 function Layout({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    const unsubscribe = initalizeEventRoomPartySocket();
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   return (
     <div className="grid place-items-center min-h-screen">
       {children}
@@ -15,6 +25,10 @@ function Layout({ children }: { children: React.ReactNode }) {
 }
 export default function Index() {
   const { data: mediaPermissionState, isPending } = useMediaPermissionState();
+  const eventParticipantStatus = useSelector(
+    globalState,
+    (s) => s.context.eventParticipantStatus,
+  );
 
   if (isPending) {
     return (
@@ -60,11 +74,14 @@ export default function Index() {
   }
 
   return (
-    <div className="grid place-items-center min-h-screen">
+    <Layout>
+      <h1 className="font-semibold text-3xl">
+        Participant Status: {eventParticipantStatus}
+      </h1>
       <div className="flex gap-x-6">
         <LocalVideo className="size-80 bg-gray-300 rounded-md" />
         <video className="size-80 bg-gray-300 rounded-md" />
       </div>
-    </div>
+    </Layout>
   );
 }
