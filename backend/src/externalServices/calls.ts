@@ -5,7 +5,7 @@ export function getCallsClient(CALLS_API_KEY: string) {
 	const callsClient = createClient<paths>({
 		baseUrl: "https://rtc.live.cloudflare.com/v1",
 		headers: {
-			"Authorization": `Bearers ${CALLS_API_KEY}`,
+			"Authorization": `Bearer ${CALLS_API_KEY}`,
 		},
 	});
 

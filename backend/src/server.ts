@@ -1,15 +1,17 @@
 import { Hono } from "hono";
 import { getCallsClient } from "./externalServices/calls";
 import { zValidator } from "@hono/zod-validator";
+import { cors } from "hono/cors";
 import { z } from "zod";
 
-export const app = new Hono<{ Bindings: Env }>().post(
+export const app = new Hono<{ Bindings: Env }>().use("*", cors()).post(
 	"/sessions",
 	async (c) => {
 		const appId = c.env.CALLS_APP_ID;
 
 		const callsClient = getCallsClient(c.env.CALLS_API_TOKEN);
 
+		console.log(`[DEBUG] ${c.env.CALLS_API_TOKEN}`);
 		const newSession = await callsClient.POST("/apps/{appId}/sessions/new", {
 			params: {
 				path: {
@@ -17,6 +19,8 @@ export const app = new Hono<{ Bindings: Env }>().post(
 				},
 			},
 		});
+
+		console.log({ newSession });
 
 		return c.json({ data: newSession.data });
 	},

@@ -28,6 +28,8 @@ export async function broadcastMediaStream(
   const remoteSdp = await broadcastRes.json();
 
   await rtcPeerConnection.setRemoteDescription(remoteSdp.sessionDescription);
+
+  return rtcPeerConnection;
 }
 
 async function createNewCallsSession() {
@@ -38,18 +40,14 @@ async function createNewCallsSession() {
   console.log({ sessionResult: data });
 
   const sessionId = data?.sessionId;
-  const sdp = data?.sessionDescription?.sdp;
-  const sdpType = data?.sessionDescription?.type;
 
   if (!sessionId) {
     throw new Error(`There is no sessionId`);
   }
 
-  if (!sdp || !sdpType) {
-    throw new Error(`There is no sessionDescription`);
-  }
-
-  return { sessionId, sessionDescription: { sdp, type: sdpType } };
+  return {
+    sessionId,
+  };
 }
 
 let sessionId: string | null = null;
@@ -74,6 +72,12 @@ function createPeerConnection() {
       },
     ],
     bundlePolicy: "max-bundle",
+  });
+
+  peerConnection.addEventListener("connectionstatechange", () => {
+    console.log(
+      `[DEBUG] New connectionState: ${peerConnection.connectionState}`,
+    );
   });
 
   return peerConnection;

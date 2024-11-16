@@ -3,8 +3,8 @@ import { initalizeEventRoomPartySocket } from "@/lib/features/broadcast/eventRoo
 import {
   LocalVideo,
   PromptUserForMediaPermission,
-  useMediaPermissionState,
-} from "@/lib/features/localMedia";
+} from "@/lib/features/broadcast/localMedia";
+import { broadcastState } from "@/lib/features/broadcast/state";
 import { globalState } from "@/lib/globalState";
 import { useSelector } from "@xstate/store/react";
 import React, { useEffect } from "react";
@@ -24,13 +24,16 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 export default function Index() {
-  const { data: mediaPermissionState, isPending } = useMediaPermissionState();
+  const mediaPermission = useSelector(
+    broadcastState,
+    (s) => s.context,
+  );
   const eventParticipantStatus = useSelector(
     globalState,
-    (s) => s.context.eventParticipantStatus,
+    (s) => s.context.event.participantStatus,
   );
 
-  if (isPending) {
+  if (mediaPermission.state === "determining") {
     return (
       <Layout>
         {null}
@@ -38,7 +41,7 @@ export default function Index() {
     );
   }
 
-  if (mediaPermissionState === "prompt") {
+  if (mediaPermission.state === "prompt") {
     return (
       <Layout>
         <Card>
@@ -55,7 +58,7 @@ export default function Index() {
     );
   }
 
-  if (mediaPermissionState === "denied") {
+  if (mediaPermission.state === "denied") {
     return (
       <Layout>
         <Card className="max-w-72">
@@ -73,13 +76,20 @@ export default function Index() {
     );
   }
 
+  if (mediaPermission.state === "granted") {
+    return <Layout>Connecting to the event...</Layout>;
+  }
+
   return (
     <Layout>
       <h1 className="font-semibold text-3xl">
         Participant Status: {eventParticipantStatus}
       </h1>
       <div className="flex gap-x-6">
-        <LocalVideo className="size-80 bg-gray-300 rounded-md" />
+        <LocalVideo
+          className="size-80 bg-gray-300 rounded-md"
+          mediaStream={mediaPermission.localMediaStream}
+        />
         <video className="size-80 bg-gray-300 rounded-md" />
       </div>
     </Layout>

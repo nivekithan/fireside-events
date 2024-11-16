@@ -1,19 +1,22 @@
 import { globalState } from "@/lib/globalState";
-import { EventRoomMessages } from "backend";
+import { EventRoomServerMessages } from "backend";
 import { PartySocket } from "partysocket";
 
-export let eventWsClient: PartySocket | null = null;
-
 export function initalizeEventRoomPartySocket() {
-  if (eventWsClient) {
+  const currentState = globalState.getSnapshot();
+
+  if (currentState.context.event.ws) {
     throw new Error(
-      `EventRoom PartySocket has already been inialized. Unsubcribe (call the retunred function) from the partySocket to inialize it again`,
+      `Event ws client already been established. You will have to call unsubscribe (function which got returned when calling initalizeEventRoomPartySocket) before calling initalizeEventRoomPartySocket`,
     );
   }
   const ws = new PartySocket({
     host: "http://localhost:8787",
     party: "event-room",
+    room: "DEFAULT_ROOM",
   });
+
+  globalState.send({ type: "eventWsInitalized", ws: ws });
 
   ws.addEventListener("message", (message) => {
     const data = message.data;
@@ -24,25 +27,23 @@ export function initalizeEventRoomPartySocket() {
       );
     }
 
-    const parsedData = safeParseJson<EventRoomMessages>(
+    const parsedData = safeParseJson<EventRoomServerMessages>(
       data,
       `Eventoom listener expects all the data to be valid json. But instead got ${data}`,
     );
 
     if (parsedData.type === "membershipStatus") {
       globalState.send({
-        type: "setEventParticipantStatus",
+        type: "eventParticipantUpdate",
         newStatus: parsedData.status,
       });
     }
   });
 
-  eventWsClient = ws;
-
   return () => {
     ws.close();
 
-    eventWsClient = null;
+    globalState.send({ type: "eventWsDestroyed" });
   };
 }
 
