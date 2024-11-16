@@ -4,15 +4,20 @@
 	"private": true,
 	"scripts": {
 		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
+		"dev": "dotenv -e .env -- wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
-		"gen:calls:openapi": "openapi-typescript https://developers.cloudflare.com/calls/static/calls-api-2024-05-21.yaml -o ./src/externalServices/schema/calls.ts"
+		"gen:calls:openapi": "openapi-typescript https://developers.cloudflare.com/calls/static/calls-api-2024-05-21.yaml -o ./src/externalServices/schema/calls.ts",
+		"db:generate": "dotenv -e ./.env -- pnpm drizzle-kit generate",
+		"db:migrate": "dotenv -e ./env -- pnpm drizzle-kit migrate"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.5.2",
 		"@cloudflare/workers-types": "^4.20241106.0",
+		"@types/node": "^22.9.0",
+		"dotenv-cli": "^7.4.2",
+		"drizzle-kit": "^0.28.1",
 		"openapi-typescript": "^7.4.3",
 		"typescript": "^5.5.2",
 		"vitest": "2.0.5",
@@ -20,9 +25,11 @@
 	},
 	"dependencies": {
 		"@hono/zod-validator": "^0.4.1",
+		"drizzle-orm": "^0.36.3",
 		"hono": "^4.6.9",
 		"openapi-fetch": "^0.13.0",
 		"partyserver": "^0.0.57",
+		"postgres": "^3.4.5",
 		"zod": "^3.23.8"
 	},
 	"exports": {

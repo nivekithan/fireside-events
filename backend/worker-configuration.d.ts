@@ -4,4 +4,5 @@ interface Env {
 	CALLS_APP_ID: "3fb2121269d353478250f1dbd988735c";
 	CALLS_API_TOKEN: string;
 	EventRoom: DurableObjectNamespace<import("./src/index").EventRoom>;
+	fireside_event: Hyperdrive;
 }
