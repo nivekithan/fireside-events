@@ -1,3 +1,4 @@
+import { connectionId } from "@/lib/backend";
 import { globalState } from "@/lib/globalState";
 import { EventRoomServerMessages } from "backend";
 import { PartySocket } from "partysocket";
@@ -13,7 +14,8 @@ export function initalizeEventRoomPartySocket() {
   const ws = new PartySocket({
     host: "http://localhost:8787",
     party: "event-room",
-    room: "DEFAULT_ROOM",
+    room: "DEFAULT",
+    id: connectionId,
   });
 
   globalState.send({ type: "eventWsInitalized", ws: ws });

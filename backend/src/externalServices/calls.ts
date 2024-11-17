@@ -11,3 +11,27 @@ export function getCallsClient(CALLS_API_KEY: string) {
 
 	return callsClient;
 }
+
+export type CallsClient = ReturnType<typeof getCallsClient>;
+
+export async function createCallsSession(
+	{ callsClient, appId }: { callsClient: CallsClient; appId: string },
+) {
+	const session = await callsClient.POST("/apps/{appId}/sessions/new", {
+		params: {
+			path: {
+				appId: appId,
+			},
+		},
+	});
+
+	const data = session.data;
+
+	const sessionId = data?.sessionId;
+
+	if (!sessionId) {
+		throw new Error(`There is no sessionId`);
+	}
+
+	return sessionId;
+}

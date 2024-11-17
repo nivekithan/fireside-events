@@ -1,5 +1,6 @@
-import { Env } from "hono";
 import { Connection, ConnectionContext, Server, WSMessage } from "partyserver";
+import { deleteParticipant } from "./db/modals";
+import { connectDb } from "./db/connect";
 
 export class EventRoom extends Server {
 	leaderId: string | null;
@@ -12,12 +13,16 @@ export class EventRoom extends Server {
 		this.env = env;
 	}
 
-	onClose(
+	async onClose(
 		connection: Connection,
-	): void | Promise<void> {
+	): Promise<void> {
 		if (this.leaderId === connection.id) {
 			this.leaderId = null;
 		}
+
+		const db = connectDb(this.env);
+
+		await deleteParticipant({ publicId: connection.id, db });
 	}
 	onConnect(
 		connection: Connection,

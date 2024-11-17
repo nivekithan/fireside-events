@@ -1,0 +1,1 @@
+ALTER TABLE "participant" ALTER COLUMN "name" SET DEFAULT 'DEFAULT';

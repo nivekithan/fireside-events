@@ -2,7 +2,7 @@ import { integer, pgTable, text } from "drizzle-orm/pg-core";
 
 export const participantsSchema = pgTable("participant", {
 	id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-	name: text("name").notNull(),
+	name: text("name").notNull().default("DEFAULT"),
 	publicId: text("public_id").notNull(),
 	callsSessionId: text("calls_session_id").notNull(),
 });

@@ -5,6 +5,5 @@ export default defineConfig({
 	schema: "./src/features/db/schema.ts",
 	dbCredentials: {
 		url: process.env.DB_URL!,
-		ssl: { rejectUnauthorized: false },
 	},
 });
