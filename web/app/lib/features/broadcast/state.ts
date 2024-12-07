@@ -1,4 +1,4 @@
-import { assign, fromPromise, setup, spawnChild } from "xstate";
+import { AnyActorRef, assign, fromPromise, setup, spawnChild } from "xstate";
 import { SignalingServer } from "./signalingServer";
 import { getPublicId } from "../identity";
 import invariant from "tiny-invariant";
@@ -76,7 +76,7 @@ export const broadcastMachine = setup({
 
       return { signalingServer };
     }),
-    stopSignalingServer: ({ context }) => {
+    stopSignalingServer: assign(({ context }) => {
       if (!context.signalingServer) {
         throw new Error(
           `Calling stopSignalingServer without ever initalizing signaling server`
@@ -85,8 +85,8 @@ export const broadcastMachine = setup({
 
       context.signalingServer.stop();
 
-      return assign({ signalingServer: null });
-    },
+      return { signalingServer: null };
+    }),
   },
   actors: {
     setAnswerToRTCPeerConnection: fromPromise(
@@ -125,29 +125,50 @@ export const broadcastMachine = setup({
       return mediaStream;
     }),
 
-    listenForPermissionChange: fromPromise(async ({ signal, self }) => {
-      const permissionStatus = await navigator.permissions.query({
-        name: "camera" as any,
-      });
+    listenForPermissionChange: fromPromise(
+      async ({
+        signal,
+        input: { parentMachine },
+      }: {
+        input: { parentMachine: AnyActorRef };
+        signal: AbortSignal;
+      }) => {
+        const permissionStatus = await navigator.permissions.query({
+          name: "camera" as any,
+        });
 
-      function permissionChangeHandler() {
-        if (permissionStatus.state === "prompt") {
-          self.send({ type: "permissionPending" });
-        } else if (permissionStatus.state === "denied") {
-          self.send({ type: "permissionDenied" });
-        } else if (permissionStatus.state === "granted") {
-          self.send({ type: "permissionGranted" });
+        console.log(`Listen for permission change: ${permissionStatus.state}`);
+
+        function permissionChangeHandler() {
+          console.log(`Change in permission: ${permissionStatus.state}`);
+          if (permissionStatus.state === "prompt") {
+            parentMachine.send({
+              type: "permissionPending",
+            } satisfies BroadcastMachineEvents);
+          } else if (permissionStatus.state === "denied") {
+            parentMachine.send({
+              type: "permissionDenied",
+            } satisfies BroadcastMachineEvents);
+          } else if (permissionStatus.state === "granted") {
+            parentMachine.send({
+              type: "permissionGranted",
+            } satisfies BroadcastMachineEvents);
+          }
         }
+
+        permissionStatus.addEventListener("change", permissionChangeHandler);
+
+        signal.onabort = () => {
+          console.log(`Stopping to listen for permission change`);
+          permissionStatus.removeEventListener(
+            "change",
+            permissionChangeHandler
+          );
+        };
+
+        return permissionStatus;
       }
-
-      permissionStatus.addEventListener("change", permissionChangeHandler);
-
-      signal.onabort = () => {
-        permissionStatus.removeEventListener("change", permissionChangeHandler);
-      };
-
-      return permissionStatus;
-    }),
+    ),
 
     broadcastLocalMediaStream: fromPromise(
       async ({ input }: { input: { mediaStream: MediaStream } }) => {
@@ -190,6 +211,9 @@ export const broadcastMachine = setup({
     determiningPermission: {
       entry: spawnChild("listenForPermissionChange", {
         id: "permissionChangeListener",
+        input({ self }) {
+          return { parentMachine: self };
+        },
       }),
       invoke: {
         src: "getPermissionStatus",
