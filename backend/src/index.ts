@@ -1,10 +1,13 @@
-import { app } from "./server";
-import { routePartykitRequest } from "partyserver";
+import { routePartykitRequest } from 'partyserver';
+import { app } from './server';
+
+export { Signaling } from './features/broadcast/signaling';
+export { SessionManager } from './features/broadcast/sessionManager';
 
 export default {
 	async fetch(req, env, ctx) {
 		const responseFromPartyKit = await routePartykitRequest(req, {
-			EventRoom: env.EventRoom,
+			signal: env.Signaling,
 		});
 
 		if (responseFromPartyKit === null) {
@@ -14,5 +17,3 @@ export default {
 		return responseFromPartyKit;
 	},
 } satisfies ExportedHandler<Env>;
-
-export { EventRoom } from "./features/eventRoom";

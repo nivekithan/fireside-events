@@ -19,7 +19,7 @@
 		"@types/node": "^22.9.0",
 		"@types/pg": "^8.11.10",
 		"dotenv-cli": "^7.4.2",
-		"drizzle-kit": "^0.28.1",
+		"drizzle-kit": "^0.29.1",
 		"openapi-typescript": "^7.4.3",
 		"typescript": "^5.5.2",
 		"vitest": "2.0.5",
@@ -27,11 +27,12 @@
 	},
 	"dependencies": {
 		"@hono/zod-validator": "^0.4.1",
-		"drizzle-orm": "^0.36.3",
+		"drizzle-orm": "^0.37.0",
 		"hono": "^4.6.9",
 		"openapi-fetch": "^0.13.0",
 		"partyserver": "^0.0.57",
 		"postgres": "^3.4.5",
+		"signaling-messages": "workspace:*",
 		"zod": "^3.23.8"
 	},
 	"exports": {

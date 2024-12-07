@@ -5,6 +5,11 @@ interface Env {
 	IS_LOCAL: true;
 	CALLS_API_TOKEN: string;
 	DB_URL: string;
-	EventRoom: DurableObjectNamespace<import("./src/index").EventRoom>;
+	Signaling: DurableObjectNamespace<import("./src/index").Signaling>;
+	SessionManager: DurableObjectNamespace<import("./src/index").SessionManager>;
 	fireside_event: Hyperdrive;
+}
+declare module "*.sql" {
+	const value: string;
+	export default value;
 }

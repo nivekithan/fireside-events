@@ -58,14 +58,18 @@ IS_LOCAL=true
 # Durable Objects can live for as long as needed. Use these when you need a long-running "server", such as in realtime apps.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#durable-objects
 [[durable_objects.bindings]]
-name = "EventRoom"
-class_name = "EventRoom"
+name = "Signaling"
+class_name = "Signaling"
+
+[[durable_objects.bindings]]
+name = "SessionManager"
+class_name = "SessionManager"
 
 # Durable Object migrations.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#migrations
 [[migrations]]
 tag = "v1"
-new_classes = ["EventRoom"]
+new_sqlite_classes = ["Signaling", "SessionManager"]
 
 # Bind a Hyperdrive configuration. Use to accelerate access to your existing databases from Cloudflare Workers.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#hyperdrive
@@ -113,3 +117,9 @@ id = "8db75e5f420a4d7f9d7bd511901c66d6"
 # [[vectorize]]
 # binding = "MY_INDEX"
 # index_name = "my-index"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.sql"]
+fallthrough = true
+

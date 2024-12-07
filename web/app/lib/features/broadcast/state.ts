@@ -1,16 +1,23 @@
 import { assign, fromPromise, setup, spawnChild } from "xstate";
 import { SignalingServer } from "./signalingServer";
 import { getPublicId } from "../identity";
+import invariant from "tiny-invariant";
+
+export type BroadcastMachineEvents =
+  | { type: "permissionGranted" }
+  | { type: "permissionDenied" }
+  | { type: "permissionPending" }
+  | { type: "rtcAnswer"; sdp: string };
 
 export const broadcastMachine = setup({
   guards: {
-    "isPermissionGranted": (_, state: PermissionState) => {
+    isPermissionGranted: (_, state: PermissionState) => {
       return state === "granted";
     },
-    "isPermissionDenied": (_, state: PermissionState) => {
+    isPermissionDenied: (_, state: PermissionState) => {
       return state === "denied";
     },
-    "isPermissionPending": (_, state: PermissionState) => {
+    isPermissionPending: (_, state: PermissionState) => {
       return state === "prompt";
     },
   },
@@ -18,30 +25,61 @@ export const broadcastMachine = setup({
     context: {} as {
       localMediaStream: null | MediaStream;
       signalingServer: SignalingServer | null;
+      rtcPeerConnection: null | RTCPeerConnection;
+      internal: {
+        answer: string | null;
+      };
     },
-    events: {} as
-      | { type: "permissionGranted" }
-      | { type: "permissionDenied" }
-      | { type: "permissionPending" },
+    events: {} as BroadcastMachineEvents,
   },
   actions: {
-    updateLocalMediaStream: (_, mediaStream: MediaStream) => {
-      return assign({ localMediaStream1: mediaStream });
+    setAnswer: assign((_, answer: string) => {
+      return { internal: { answer } };
+    }),
+
+    pushLocalTracks(
+      { context },
+      {
+        localOffer,
+        transrecivers,
+      }: {
+        localOffer: RTCLocalSessionDescriptionInit;
+        transrecivers: Array<RTCRtpTransceiver>;
+      }
+    ) {
+      const signalingServer = context.signalingServer;
+      if (!signalingServer) {
+        throw new Error(`Expected Signaling Server to be initalized`);
+      }
+      signalingServer.pushLocalTrack({
+        localOffer: localOffer,
+        transreviers: transrecivers,
+      });
     },
-    listenToSignalingServer: () => {
+    assignRtcPeerConnection: assign(
+      (_, rtcPeerConnection: RTCPeerConnection) => {
+        return { rtcPeerConnection: rtcPeerConnection };
+      }
+    ),
+    updateLocalMediaStream: assign((_, mediaStream: MediaStream) => {
+      return { localMediaStream: mediaStream };
+    }),
+
+    listenToSignalingServer: assign(({ self }) => {
       const signalingServer = new SignalingServer({
         room: "DEFAULT",
         id: getPublicId(),
+        parentMachine: self,
       });
 
       signalingServer.listen();
 
-      return assign({ signalingServer });
-    },
+      return { signalingServer };
+    }),
     stopSignalingServer: ({ context }) => {
       if (!context.signalingServer) {
         throw new Error(
-          `Calling stopSignalingServer without ever initalizing signaling server`,
+          `Calling stopSignalingServer without ever initalizing signaling server`
         );
       }
 
@@ -51,6 +89,18 @@ export const broadcastMachine = setup({
     },
   },
   actors: {
+    setAnswerToRTCPeerConnection: fromPromise(
+      async ({
+        input: { answer, rtcPeerConnection },
+      }: {
+        input: { rtcPeerConnection: RTCPeerConnection; answer: string };
+      }) => {
+        return rtcPeerConnection.setRemoteDescription({
+          type: "answer",
+          sdp: answer,
+        });
+      }
+    ),
     getPermissionStatus: fromPromise(async () => {
       const permissionStatus = await navigator.permissions.query({
         name: "camera" as any,
@@ -60,6 +110,14 @@ export const broadcastMachine = setup({
     }),
 
     askForPermission: fromPromise(async () => {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+      });
+
+      return mediaStream;
+    }),
+
+    getMediaStream: fromPromise(async () => {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: true,
       });
@@ -90,11 +148,43 @@ export const broadcastMachine = setup({
 
       return permissionStatus;
     }),
+
+    broadcastLocalMediaStream: fromPromise(
+      async ({ input }: { input: { mediaStream: MediaStream } }) => {
+        const localMediaStream = input.mediaStream;
+
+        const rtcConnection = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: "stun:stun.cloudflare.com:3478",
+            },
+          ],
+          bundlePolicy: "max-bundle",
+        });
+
+        const transrecivers = localMediaStream.getTracks().map((t) => {
+          return rtcConnection.addTransceiver(t, { direction: "sendonly" });
+        });
+
+        const localOffer = await rtcConnection.createOffer();
+
+        await rtcConnection.setLocalDescription(localOffer);
+
+        return { localOffer, rtcConnection, transrecivers };
+      }
+    ),
   },
 }).createMachine({
   id: "broadcast",
   initial: "determiningPermission",
-  context: { localMediaStream: null, signalingServer: null },
+  context: {
+    localMediaStream: null,
+    signalingServer: null,
+    rtcPeerConnection: null,
+    internal: {
+      answer: null,
+    },
+  },
 
   states: {
     determiningPermission: {
@@ -140,6 +230,28 @@ export const broadcastMachine = setup({
         permissionPending: "permissionPending",
         permissionDenied: "permissionDenied",
       },
+      invoke: {
+        src: "getMediaStream",
+        onDone: {
+          actions: {
+            type: "updateLocalMediaStream",
+            params({ event }) {
+              return event.output;
+            },
+          },
+          target: "broadcasting",
+        },
+        onError: {
+          target: "unableToGetMediaStream",
+        },
+      },
+    },
+    unableToGetMediaStream: {
+      on: {
+        permissionDenied: "permissionDenied",
+        permissionPending: "permissionPending",
+        permissionGranted: "permissionGranted",
+      },
     },
     permissionDenied: {
       on: {
@@ -176,14 +288,90 @@ export const broadcastMachine = setup({
       },
     },
     broadcasting: {
+      entry: ["listenToSignalingServer"],
+      exit: ["stopSignalingServer"],
       on: {
         permissionDenied: "permissionDenied",
         permissionPending: "permissionPending",
       },
       initial: "creatingOffer",
       states: {
-        creatingOffer: {},
-        waitingForReply: {},
+        creatingOffer: {
+          invoke: {
+            src: "broadcastLocalMediaStream",
+            input: ({ context }) => {
+              if (!context.localMediaStream) {
+                throw new Error(`Expected localMediaStream to be initialized`);
+              }
+
+              return { mediaStream: context.localMediaStream };
+            },
+            onDone: {
+              actions: [
+                {
+                  type: "assignRtcPeerConnection",
+                  params({ event }) {
+                    return event.output.rtcConnection;
+                  },
+                },
+                {
+                  type: "pushLocalTracks",
+                  params({ event }) {
+                    return {
+                      localOffer: event.output.localOffer,
+                      transrecivers: event.output.transrecivers,
+                    };
+                  },
+                },
+              ],
+              target: "waitingForReply",
+            },
+            onError: {
+              target: "unableToCreateOffer",
+            },
+          },
+        },
+        unableToCreateOffer: {},
+        waitingForReply: {
+          on: {
+            rtcAnswer: {
+              actions: {
+                type: "setAnswer",
+                params({ event }) {
+                  return event.sdp;
+                },
+              },
+              target: "processingAnswer",
+            },
+          },
+        },
+        processingAnswer: {
+          invoke: {
+            src: "setAnswerToRTCPeerConnection",
+            input({ context }) {
+              invariant(
+                context.rtcPeerConnection,
+                "Expected RTCPeerConnection to be initialised"
+              );
+              invariant(
+                context.internal.answer,
+                "Expected internal.answer to be set"
+              );
+              return {
+                rtcPeerConnection: context.rtcPeerConnection,
+                answer: context.internal.answer,
+              };
+            },
+            onDone: {
+              target: "broadcastingLocalStream",
+            },
+            onError: {
+              target: "unableToProcessAnswer",
+            },
+          },
+        },
+        broadcastingLocalStream: {},
+        unableToProcessAnswer: {},
       },
     },
   },
