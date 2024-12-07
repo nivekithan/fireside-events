@@ -1,8 +1,11 @@
 import { getPublicId } from "~/lib/features/identity";
 import type { Route } from "./+types/home";
 import { useMachine } from "@xstate/react";
-import { broadcastMachine } from "~/lib/features/broadcast/state";
-import React from "react";
+import {
+  BroadcastMachine,
+  broadcastMachine,
+} from "~/lib/features/broadcast/state";
+import React, { useEffect, useRef } from "react";
 import {
   Card,
   CardDescription,
@@ -11,6 +14,8 @@ import {
 } from "~/components/ui/card";
 import { Spinner } from "~/components/ui/spinner";
 import { NOTFOUND } from "dns";
+import { MachineSnapshot } from "xstate";
+import invariant from "tiny-invariant";
 
 export function clientLoader({}: Route.ClientLoaderArgs) {
   const publicId = getPublicId();
@@ -67,12 +72,47 @@ export default function Component({ loaderData }: Route.ComponentProps) {
       </Layout>
     );
   } else if (snapshot.matches("broadcasting")) {
-    return <Layout>Broadcasting</Layout>;
+    return (
+      <Layout>
+        <Broadcasting snapshot={snapshot} />
+      </Layout>
+    );
   }
 }
 
-function Layout({ children }: React.PropsWithChildren<{}>) {
-  return <div className="grid place-items-center min-h-screen">{children}</div>;
+function Broadcasting({
+  snapshot,
+}: React.PropsWithoutRef<{
+  snapshot: ReturnType<typeof broadcastMachine.getInitialSnapshot>;
+}>) {
+  const videoEleRef = useRef<HTMLVideoElement | null>(null);
+
+  invariant(
+    snapshot.matches("broadcasting"),
+    "Expected broadcasting to be rendered when snapshot matches broadcasting"
+  );
+
+  const mediaStream = snapshot.context.localMediaStream;
+
+  invariant(mediaStream, `Expected context.localMediaStream to be not null`);
+
+  useEffect(() => {
+    if (!videoEleRef.current) {
+      return;
+    }
+
+    console.log(`VideoRef`, mediaStream.getTracks().length);
+    videoEleRef.current.srcObject = mediaStream;
+  }, []);
+
+  return (
+    <video
+      ref={videoEleRef}
+      autoPlay
+      playsInline
+      className="size-72 rounded-lg"
+    />
+  );
 }
 
 function Notify({
@@ -87,4 +127,8 @@ function Notify({
       </CardHeader>
     </Card>
   );
+}
+
+function Layout({ children }: React.PropsWithChildren<{}>) {
+  return <div className="grid place-items-center min-h-screen">{children}</div>;
 }

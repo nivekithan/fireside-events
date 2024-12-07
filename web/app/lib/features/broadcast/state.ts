@@ -400,3 +400,5 @@ export const broadcastMachine = setup({
     },
   },
 });
+
+export type BroadcastMachine = typeof broadcastMachine;
