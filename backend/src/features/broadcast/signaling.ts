@@ -4,6 +4,7 @@ import migrations from '../../../migrations/signalingDb/migrations';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { publicIdToSessionId, track } from './signalingDb/schema';
+import { eq } from 'drizzle-orm';
 
 export class Signaling extends Server<Env> {
 	#db: DrizzleSqliteDODatabase<any>;
@@ -17,11 +18,28 @@ export class Signaling extends Server<Env> {
 		return migrate(this.#db, migrations);
 	}
 
-	async onMessage(connection: Connection, message: WSMessage): Promise<void> {
-		console.log('Migrating database');
-		await this.migrate();
-		console.log('Database migrated');
+	async onStart(): Promise<void> {
+		return this.migrate();
+	}
+	async onClose(connection: Connection): Promise<void> {
+		const publicId = connection.id;
 
+		const deletedRows = await this.#db.delete(publicIdToSessionId).where(eq(publicIdToSessionId.publicId, publicId)).returning();
+
+		if (deletedRows.length > 1) {
+			throw new Error(`Expected deleted Rows to be less than or equal to 1`);
+		}
+
+		const deletedRow = deletedRows[0];
+
+		if (!deletedRow) {
+			return;
+		}
+
+		await this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId));
+	}
+
+	async onMessage(connection: Connection, message: WSMessage): Promise<void> {
 		const publicId = connection.id;
 
 		if (typeof message !== 'string') {
