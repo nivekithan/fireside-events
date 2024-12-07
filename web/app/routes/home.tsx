@@ -86,12 +86,6 @@ function Broadcasting({
   snapshot: ReturnType<typeof broadcastMachine.getInitialSnapshot>;
 }>) {
   const videoEleRef = useRef<HTMLVideoElement | null>(null);
-
-  invariant(
-    snapshot.matches("broadcasting"),
-    "Expected broadcasting to be rendered when snapshot matches broadcasting"
-  );
-
   const mediaStream = snapshot.context.localMediaStream;
 
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
@@ -130,5 +124,16 @@ function Notify({
 }
 
 function Layout({ children }: React.PropsWithChildren<{}>) {
-  return <div className="grid place-items-center min-h-screen">{children}</div>;
+  return (
+    <div className="grid place-items-center min-h-screen relative">
+      <TopLeftText text={getPublicId()} />
+      {children}
+    </div>
+  );
+}
+
+function TopLeftText({ text }: React.PropsWithoutRef<{ text: string }>) {
+  return (
+    <div className="absolute top-4 left-4 text-white font-medium">{text}</div>
+  );
 }
