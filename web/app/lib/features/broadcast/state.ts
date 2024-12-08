@@ -37,6 +37,9 @@ export const broadcastMachine = setup({
     events: {} as BroadcastMachineEvents,
   },
   actions: {
+    logUnhandledEvent: ({ event }) => {
+      console.log(`Unhandled Event: `, event);
+    },
     setNewMediaStream: assign(({ context }, mediaStream: MediaStream) => {
       return {
         remoteMediaStreams: [...context.remoteMediaStreams, mediaStream],
@@ -108,6 +111,16 @@ export const broadcastMachine = setup({
 
       signalingServer.regenotiate(answer);
     },
+    spawnRemoteTracksListener: assign(
+      ({ spawn, self, context }, rtcConnection: RTCPeerConnection) => {
+        spawn("listenForNewRemoteTracks", {
+          id: "ListenForNewRemoteTracks",
+          input: { parentMachine: self, rtcPeerConnection: rtcConnection },
+        });
+
+        return context;
+      }
+    ),
   },
   actors: {
     setOfferToRTCPeerConnection: fromPromise(
@@ -121,8 +134,6 @@ export const broadcastMachine = setup({
         );
 
         const newAnswer = await rtcPeerConnection.createAnswer();
-
-        console.log(`Newly created answer`, newAnswer);
 
         rtcPeerConnection.setLocalDescription(
           new RTCSessionDescription({ type: "answer", sdp: newAnswer.sdp })
@@ -224,10 +235,7 @@ export const broadcastMachine = setup({
           name: "camera" as any,
         });
 
-        console.log(`Listen for permission change: ${permissionStatus.state}`);
-
         function permissionChangeHandler() {
-          console.log(`Change in permission: ${permissionStatus.state}`);
           if (permissionStatus.state === "prompt") {
             parentMachine.send({
               type: "permissionPending",
@@ -246,7 +254,6 @@ export const broadcastMachine = setup({
         permissionStatus.addEventListener("change", permissionChangeHandler);
 
         signal.onabort = () => {
-          console.log(`Stopping to listen for permission change`);
           permissionStatus.removeEventListener(
             "change",
             permissionChangeHandler
@@ -435,16 +442,12 @@ export const broadcastMachine = setup({
                     return event.output.rtcConnection;
                   },
                 },
-                assign(({ event, spawn, self, context }) => {
-                  const output = event.output.rtcConnection;
-
-                  spawn("listenForNewRemoteTracks", {
-                    id: "ListenForNewRemoteTracks",
-                    input: { parentMachine: self, rtcPeerConnection: output },
-                  });
-
-                  return context;
-                }),
+                {
+                  type: "spawnRemoteTracksListener",
+                  params({ event }) {
+                    return event.output.rtcConnection;
+                  },
+                },
                 {
                   type: "pushLocalTracks",
                   params({ event }) {
@@ -556,7 +559,6 @@ export const broadcastMachine = setup({
               actions: {
                 type: "setOffer",
                 params({ event }) {
-                  console.log(`Got setOffer`);
                   return event.sdp;
                 },
               },
@@ -571,9 +573,7 @@ export const broadcastMachine = setup({
   },
   on: {
     "*": {
-      actions: ({ event }) => {
-        console.log(`Unhandled Event: `, event);
-      },
+      actions: "logUnhandledEvent",
     },
   },
 });

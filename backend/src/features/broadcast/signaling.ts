@@ -6,7 +6,6 @@ import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { publicIdToSessionId, track } from './signalingDb/schema';
 import { and, eq, ne } from 'drizzle-orm';
 import { SessionManager } from './sessionManager';
-import { parse } from 'hono/utils/cookie';
 
 export class Signaling extends Server<Env> {
 	#db: DrizzleSqliteDODatabase<any>;

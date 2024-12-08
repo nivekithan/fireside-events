@@ -84,25 +84,7 @@ function Broadcasting({
   const remoteMediaStreams = snapshot.context.remoteMediaStreams;
   const rtcConnection = snapshot.context.rtcPeerConnection;
 
-  console.log("snapshot", snapshot);
-
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
-
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      // console.log(rtcConnection?.getTransceivers().map((t) => t));
-      if (rtcConnection) {
-        formatStatsForLogging(rtcConnection).then((stats) => {
-          console.log("peerconnectionStats", stats);
-          console.log("iceconnectionState", rtcConnection.iceConnectionState);
-        });
-      }
-    }, 5_000);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [rtcConnection]);
 
   return (
     <div>
@@ -124,16 +106,6 @@ function MediaStream({ mediaStream }: { mediaStream: MediaStream }) {
 
     videoEleRef.current.srcObject = mediaStream;
   }, []);
-
-  // useEffect(() => {
-  //   const intervalId = setInterval(() => {
-  //     console.log(mediaStream.getTracks());
-  //   }, 5_000);
-
-  //   return () => {
-  //     clearInterval(intervalId);
-  //   };
-  // }, []);
 
   return (
     <video
@@ -171,53 +143,4 @@ function TopLeftText({ text }: React.PropsWithoutRef<{ text: string }>) {
   return (
     <div className="absolute top-4 left-4 text-white font-medium">{text}</div>
   );
-}
-async function formatStatsForLogging(peerConnection: RTCPeerConnection) {
-  try {
-    const stats = await peerConnection.getStats(null);
-    const formattedStats: any = {};
-
-    stats.forEach((report) => {
-      const statObject: any = {
-        id: report.id,
-        type: report.type,
-        timestamp: report.timestamp,
-      };
-
-      // Add specific properties based on the type of the report
-      switch (report.type) {
-        case "inbound-rtp":
-        case "outbound-rtp":
-          statObject.mediaType = report.mediaType;
-          statObject.ssrc = report.ssrc;
-          statObject.packetsSent = report.packetsSent || 0;
-          statObject.packetsReceived = report.packetsReceived || 0;
-          statObject.bytesSent = report.bytesSent || 0;
-          statObject.bytesReceived = report.bytesReceived || 0;
-          break;
-        case "candidate-pair":
-          statObject.bytesSent = report.bytesSent || 0;
-          statObject.bytesReceived = report.bytesReceived || 0;
-          statObject.currentRoundTripTime = report.currentRoundTripTime || 0;
-          statObject.totalRoundTripTime = report.totalRoundTripTime || 0;
-          break;
-        case "local-candidate":
-        case "remote-candidate":
-          statObject.candidateType = report.candidateType;
-          statObject.ip = report.ip;
-          statObject.networkType = report.networkType;
-          break;
-        // Add more cases as needed to handle other report types
-        default:
-          break;
-      }
-
-      formattedStats[report.id] = statObject;
-    });
-
-    return formattedStats;
-  } catch (error) {
-    console.error("Error fetching stats:", error);
-    return null;
-  }
 }
