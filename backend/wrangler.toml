@@ -1,5 +1,5 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "backend"
+name = "calls-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-06"
 compatibility_flags = ["nodejs_compat"]
@@ -24,7 +24,6 @@ enabled = true
 # - https://developers.cloudflare.com/workers/configuration/secrets/
 [vars]
 CALLS_APP_ID= "3fb2121269d353478250f1dbd988735c"
-IS_LOCAL=true
 
 # Bind the Workers AI model catalog. Run machine learning models, powered by serverless GPUs, on Cloudflare’s global network
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#workers-ai
@@ -73,9 +72,9 @@ new_sqlite_classes = ["Signaling", "SessionManager"]
 
 # Bind a Hyperdrive configuration. Use to accelerate access to your existing databases from Cloudflare Workers.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#hyperdrive
-[[hyperdrive]]
-binding = "fireside_event"
-id = "8db75e5f420a4d7f9d7bd511901c66d6"
+# [[hyperdrive]]
+# binding = "fireside_event"
+# id = "8db75e5f420a4d7f9d7bd511901c66d6"
 
 # Bind a KV Namespace. Use KV as persistent storage for small key-value pairs.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#kv-namespaces
@@ -123,3 +122,6 @@ type = "Text"
 globs = ["**/*.sql"]
 fallthrough = true
 
+[[routes]]
+pattern = "calls-api.nivekithan.com"
+custom_domain = true

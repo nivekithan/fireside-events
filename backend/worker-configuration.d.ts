@@ -2,12 +2,10 @@
 
 interface Env {
 	CALLS_APP_ID: "3fb2121269d353478250f1dbd988735c";
-	IS_LOCAL: true;
 	CALLS_API_TOKEN: string;
 	DB_URL: string;
 	Signaling: DurableObjectNamespace<import("./src/index").Signaling>;
 	SessionManager: DurableObjectNamespace<import("./src/index").SessionManager>;
-	fireside_event: Hyperdrive;
 }
 declare module "*.sql" {
 	const value: string;

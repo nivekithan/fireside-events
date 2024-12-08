@@ -1,0 +1,11 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "call-frontend"
+compatibility_date = "2024-12-08"
+assets = { directory = "./build/client" }
+
+[observability]
+enabled = true
+
+[[routes]]
+pattern = "calls.nivekithan.com"
+custom_domain = true

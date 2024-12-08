@@ -25,7 +25,7 @@ export class SignalingServer {
 
     this.#partySocket = new PartySocket({
       id: id,
-      host: "localhost:8787",
+      host: import.meta.env.VITE_SIGNALING_SERVER_HOST,
       party: "signal",
       room: room,
     });

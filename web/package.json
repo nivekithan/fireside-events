@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "react-router build",
+    "build": "react-router build --mode production",
     "dev": "react-router dev",
-    "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc --build --noEmit"
+    "start": "wrangler dev",
+    "typecheck": "react-router typegen && tsc --build --noEmit",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@react-router/node": "^7.0.1",
@@ -37,6 +38,7 @@
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
-    "vite-tsconfig-paths": "^5.1.2"
+    "vite-tsconfig-paths": "^5.1.2",
+    "wrangler": "^3.60.3"
   }
 }
