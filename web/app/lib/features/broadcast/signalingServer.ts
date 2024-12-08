@@ -37,14 +37,14 @@ export class SignalingServer {
       return;
     }
 
-    const messageHandler = this.#handleMessage(this.#parentMachine);
+    const messageHandler = this.#handleMessage();
 
     this.#partySocket.addEventListener("message", messageHandler);
 
     this.#messageHandler = messageHandler;
   }
 
-  #handleMessage(parentMachine: AnyActorRef) {
+  #handleMessage() {
     return (message: MessageEvent<unknown>) => {
       const data = message.data;
 
@@ -58,8 +58,14 @@ export class SignalingServer {
 
       if (parsedMessage.type === "rtcAnswer") {
         this.#sendEvent({ type: "rtcAnswer", sdp: parsedMessage.sdp });
+      } else if (parsedMessage.type === "rtcOffer") {
+        this.#sendEvent({ type: "rtcOffer", sdp: parsedMessage.sdp });
       }
     };
+  }
+
+  regenotiate(answer: string) {
+    this.#sendMessage({ type: "rtcAnswer", sdp: answer });
   }
 
   pushLocalTrack({

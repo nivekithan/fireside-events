@@ -7,7 +7,9 @@ export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
   | { type: "permissionDenied" }
   | { type: "permissionPending" }
-  | { type: "rtcAnswer"; sdp: string };
+  | { type: "rtcAnswer"; sdp: string }
+  | { type: "rtcOffer"; sdp: string }
+  | { type: "newMediaStream"; mediaStream: MediaStream };
 
 export const broadcastMachine = setup({
   guards: {
@@ -28,13 +30,24 @@ export const broadcastMachine = setup({
       rtcPeerConnection: null | RTCPeerConnection;
       internal: {
         answer: string | null;
+        offer: string | null;
       };
+      remoteMediaStreams: Array<MediaStream>;
     },
     events: {} as BroadcastMachineEvents,
   },
   actions: {
-    setAnswer: assign((_, answer: string) => {
-      return { internal: { answer } };
+    setNewMediaStream: assign(({ context }, mediaStream: MediaStream) => {
+      return {
+        remoteMediaStreams: [...context.remoteMediaStreams, mediaStream],
+      };
+    }),
+    setOffer: assign(({ context }, offer: string) => {
+      return { internal: { ...context.internal, offer: offer } };
+    }),
+
+    setAnswer: assign(({ context }, answer: string) => {
+      return { internal: { ...context.internal, answer } };
     }),
 
     pushLocalTracks(
@@ -87,18 +100,50 @@ export const broadcastMachine = setup({
 
       return { signalingServer: null };
     }),
+
+    sendAnswer: ({ context }, answer: string) => {
+      const signalingServer = context.signalingServer;
+
+      invariant(signalingServer, `Expected signaling server to be initalized`);
+
+      signalingServer.regenotiate(answer);
+    },
   },
   actors: {
+    setOfferToRTCPeerConnection: fromPromise(
+      async ({
+        input: { offer, rtcPeerConnection },
+      }: {
+        input: { offer: string; rtcPeerConnection: RTCPeerConnection };
+      }) => {
+        await rtcPeerConnection.setRemoteDescription(
+          new RTCSessionDescription({ type: "offer", sdp: offer })
+        );
+
+        const newAnswer = await rtcPeerConnection.createAnswer();
+
+        console.log(`Newly created answer`, newAnswer);
+
+        rtcPeerConnection.setLocalDescription(
+          new RTCSessionDescription({ type: "answer", sdp: newAnswer.sdp })
+        );
+
+        if (!newAnswer.sdp) {
+          throw new Error(`Unable to generate newAnswer`);
+        }
+
+        return { newAnswer: { type: "answer", sdp: newAnswer.sdp } };
+      }
+    ),
     setAnswerToRTCPeerConnection: fromPromise(
       async ({
         input: { answer, rtcPeerConnection },
       }: {
         input: { rtcPeerConnection: RTCPeerConnection; answer: string };
       }) => {
-        return rtcPeerConnection.setRemoteDescription({
-          type: "answer",
-          sdp: answer,
-        });
+        return rtcPeerConnection.setRemoteDescription(
+          new RTCSessionDescription({ type: "answer", sdp: answer })
+        );
       }
     ),
     getPermissionStatus: fromPromise(async () => {
@@ -125,6 +170,48 @@ export const broadcastMachine = setup({
       return mediaStream;
     }),
 
+    listenForNewRemoteTracks: fromPromise(
+      async ({
+        input: { rtcPeerConnection, parentMachine },
+        signal,
+      }: {
+        input: {
+          rtcPeerConnection: RTCPeerConnection;
+          parentMachine: AnyActorRef;
+        };
+        signal: AbortSignal;
+      }) => {
+        function handleNewRemoteTrack(e: RTCTrackEvent) {
+          if (e.transceiver.direction !== "recvonly") {
+            // Since direction is not recvonly it means the track is not of remote
+            // so we can ignore this event
+            return;
+          }
+
+          const newMediaStream = new MediaStream();
+
+          console.log(
+            `Adding new Remote track`,
+            "track",
+            e.track,
+            "transreciver",
+            e.transceiver
+          );
+          newMediaStream.addTrack(e.track);
+
+          parentMachine.send({
+            type: "newMediaStream",
+            mediaStream: newMediaStream,
+          } satisfies BroadcastMachineEvents);
+        }
+
+        rtcPeerConnection.addEventListener("track", handleNewRemoteTrack);
+
+        signal.onabort = () => {
+          rtcPeerConnection.removeEventListener("track", handleNewRemoteTrack);
+        };
+      }
+    ),
     listenForPermissionChange: fromPromise(
       async ({
         signal,
@@ -204,7 +291,9 @@ export const broadcastMachine = setup({
     rtcPeerConnection: null,
     internal: {
       answer: null,
+      offer: null,
     },
+    remoteMediaStreams: [],
   },
 
   states: {
@@ -317,6 +406,14 @@ export const broadcastMachine = setup({
       on: {
         permissionDenied: "permissionDenied",
         permissionPending: "permissionPending",
+        newMediaStream: {
+          actions: {
+            type: "setNewMediaStream",
+            params({ event }) {
+              return event.mediaStream;
+            },
+          },
+        },
       },
       initial: "creatingOffer",
       states: {
@@ -338,6 +435,16 @@ export const broadcastMachine = setup({
                     return event.output.rtcConnection;
                   },
                 },
+                assign(({ event, spawn, self, context }) => {
+                  const output = event.output.rtcConnection;
+
+                  spawn("listenForNewRemoteTracks", {
+                    id: "ListenForNewRemoteTracks",
+                    input: { parentMachine: self, rtcPeerConnection: output },
+                  });
+
+                  return context;
+                }),
                 {
                   type: "pushLocalTracks",
                   params({ event }) {
@@ -367,9 +474,58 @@ export const broadcastMachine = setup({
               },
               target: "processingAnswer",
             },
+            rtcOffer: {
+              actions: {
+                type: "setOffer",
+                params({ event }) {
+                  return event.sdp;
+                },
+              },
+              target: "processingOffer",
+            },
+          },
+        },
+        processingOffer: {
+          invoke: {
+            src: "setOfferToRTCPeerConnection",
+            input({ context }) {
+              const rtcPeerConnection = context.rtcPeerConnection;
+              const offer = context.internal.offer;
+
+              invariant(
+                rtcPeerConnection,
+                `Expected RTCPeerConnection to be initalized`
+              );
+              invariant(offer, `Expected offer to be initialized`);
+
+              return { offer, rtcPeerConnection };
+            },
+            onDone: {
+              actions: {
+                type: "sendAnswer",
+                params({ event }) {
+                  return event.output.newAnswer.sdp;
+                },
+              },
+              target: "broadcastingLocalStream",
+            },
+            onError: {
+              target: "unableToProcessOffer",
+            },
           },
         },
         processingAnswer: {
+          on: {
+            rtcOffer: {
+              actions: {
+                type: "setOffer",
+                params({ event }) {
+                  return event.sdp;
+                },
+              },
+              target: "processingOffer",
+            },
+          },
           invoke: {
             src: "setAnswerToRTCPeerConnection",
             input({ context }) {
@@ -394,8 +550,29 @@ export const broadcastMachine = setup({
             },
           },
         },
-        broadcastingLocalStream: {},
+        broadcastingLocalStream: {
+          on: {
+            rtcOffer: {
+              actions: {
+                type: "setOffer",
+                params({ event }) {
+                  console.log(`Got setOffer`);
+                  return event.sdp;
+                },
+              },
+              target: "processingOffer",
+            },
+          },
+        },
         unableToProcessAnswer: {},
+        unableToProcessOffer: {},
+      },
+    },
+  },
+  on: {
+    "*": {
+      actions: ({ event }) => {
+        console.log(`Unhandled Event: `, event);
       },
     },
   },
