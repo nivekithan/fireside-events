@@ -87,7 +87,7 @@ function Broadcasting({
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 
   return (
-    <div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
       <MediaStream mediaStream={mediaStream} />
       {remoteMediaStreams.map((mediaStream) => {
         return <MediaStream mediaStream={mediaStream} key={mediaStream.id} />;
