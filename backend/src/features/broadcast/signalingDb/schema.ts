@@ -14,6 +14,7 @@ export const track = sqliteTable(
 		sessionId: text('session_id').notNull(),
 		name: text('name').notNull(),
 		location: text('location').notNull(),
+		mId: text('m_id').notNull(),
 		remoteSessionId: text('remote_session_id'),
 	},
 	(t) => {

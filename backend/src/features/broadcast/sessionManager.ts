@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { getCallsClient } from '../../externalServices/calls';
 import { createCssJsxDomObjects } from 'hono/jsx/dom/css';
+import errorMap from 'zod/locales/en.js';
 
 export class SessionManager extends DurableObject<Env> {
 	static SESSION_ID_KEY = 'SESSION_ID';
@@ -11,6 +12,29 @@ export class SessionManager extends DurableObject<Env> {
 		super(ctx, env);
 
 		this.#sql = ctx.storage.sql;
+	}
+
+	async deleteLocalTracks(tracks: Array<{ mId: string }>) {
+		const sessionId = await this.#requireSessionId();
+
+		const callsClient = getCallsClient(this.env.CALLS_API_TOKEN);
+
+		const closeTracksResponse = await callsClient.PUT('/apps/{appId}/sessions/{sessionId}/tracks/close', {
+			params: {
+				path: {
+					appId: this.env.CALLS_APP_ID,
+					sessionId: sessionId,
+				},
+			},
+			body: {
+				force: true,
+				tracks: tracks.map((t) => {
+					return { mid: t.mId };
+				}),
+			},
+		});
+
+		console.log({ closeTracksResponse: closeTracksResponse });
 	}
 
 	async renegotiateAnswer({ sdp }: { sdp: string }) {
@@ -71,7 +95,19 @@ export class SessionManager extends DurableObject<Env> {
 			throw new Error(`Unable to generate offer. Offer returned undefined: Full response: ${JSON.stringify(remoteTracksResponse)}`);
 		}
 
-		return { type: 'offer', sdp: offer };
+		const remoteTracks = remoteTracksResponse.data.tracks?.map((t) => {
+			if (!t.mid || !t.sessionId || !t.trackName) {
+				throw new Error(`Invalid remoteTracksResponse: ${JSON.stringify(remoteTracksResponse, null, 2)}`);
+			}
+
+			return { mId: t.mid, remoteSessionId: t.sessionId, trackName: t.trackName };
+		});
+
+		if (!remoteTracks) {
+			throw new Error(`Invalid remoteTracksResponse: ${JSON.stringify(remoteTracksResponse, null, 2)}`);
+		}
+
+		return { type: 'offer', sdp: offer, remoteTracks };
 	}
 
 	async pushLocalTracks({ tracks, sdp }: { tracks: Array<{ mId: string; name: string }>; sdp: string }) {

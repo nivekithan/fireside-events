@@ -38,7 +38,22 @@ export class Signaling extends Server<Env> {
 			return;
 		}
 
-		await this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId));
+		// Deletes all local tracks associated with the deleted sesssion
+		const localTracks = await this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId)).returning();
+
+		const sessionManangerId = this.env.SessionManager.idFromName(publicId);
+
+		const sessionMananger = this.env.SessionManager.get(sessionManangerId);
+
+		const trackMids = localTracks.map((t) => {
+			if (!t.mId) {
+				throw new Error(`There is no mId on track`);
+			}
+
+			return { mId: t.mId };
+		});
+
+		await sessionMananger.deleteLocalTracks(trackMids);
 	}
 
 	async onMessage(connection: Connection, message: WSMessage): Promise<void> {
@@ -67,10 +82,11 @@ export class Signaling extends Server<Env> {
 			await this.#db.insert(publicIdToSessionId).values({ publicId: publicId, sessionId: pushLocalTracksResponse.sessionId });
 			await this.#db.insert(track).values(
 				parsedMessages.tracks.map((t) => {
-					return { location: 'local', name: t.name, sessionId: pushLocalTracksResponse.sessionId };
+					return { location: 'local', name: t.name, sessionId: pushLocalTracksResponse.sessionId, mId: t.mId };
 				})
 			);
 
+			// Add's any other tracks to the current session as remote tracks
 			const newOffer = await this.newOfferForOtherTracks({ sessionId: pushLocalTracksResponse.sessionId, sessionManager: sessionManager });
 
 			if (newOffer) {
@@ -81,25 +97,31 @@ export class Signaling extends Server<Env> {
 			}
 
 			const singletrack = parsedMessages.tracks[0];
-			await this.informAboutNewLocalTrack({ name: singletrack.name, sessionId: pushLocalTracksResponse.sessionId });
+			await this.informAboutNewLocalTrack({ name: singletrack.name, remoteSessionId: pushLocalTracksResponse.sessionId });
 		} else if (parsedMessages.type === 'rtcAnswer') {
 			await sessionManager.renegotiateAnswer({ sdp: parsedMessages.sdp });
 		}
 	}
 
-	async informAboutNewLocalTrack({ name, sessionId }: { sessionId: string; name: string }) {
-		const allOtherPublicId = await this.#db.select().from(publicIdToSessionId).where(ne(publicIdToSessionId.sessionId, sessionId));
+	async informAboutNewLocalTrack({ name, remoteSessionId }: { remoteSessionId: string; name: string }) {
+		const allOtherPublicId = await this.#db.select().from(publicIdToSessionId).where(ne(publicIdToSessionId.sessionId, remoteSessionId));
 
 		if (allOtherPublicId.length === 0) {
 			return;
 		}
 
 		const newOffers = await Promise.all(
-			allOtherPublicId.map(async ({ publicId }) => {
+			allOtherPublicId.map(async ({ publicId, sessionId }) => {
 				const sessionManagerId = this.env.SessionManager.idFromName(publicId);
 				const sessionManager = this.env.SessionManager.get(sessionManagerId);
 
-				const offer = await sessionManager.pushRemoteTracks({ tracks: [{ name: name, sessionId }] });
+				const offer = await sessionManager.pushRemoteTracks({ tracks: [{ name: name, sessionId: remoteSessionId }] });
+
+				await this.#db.insert(track).values(
+					offer.remoteTracks.map((t) => {
+						return { remoteSessionId: t.remoteSessionId, sessionId: sessionId, location: 'remote', mId: t.mId, name: t.trackName };
+					})
+				);
 
 				return { offer: offer, publicId };
 			})
@@ -118,8 +140,9 @@ export class Signaling extends Server<Env> {
 			});
 		});
 	}
+
 	async newOfferForOtherTracks({ sessionId, sessionManager }: { sessionManager: DurableObjectStub<SessionManager>; sessionId: string }) {
-		const allOtherRemoteTracks = await this.getAllRemoteTracks(sessionId);
+		const allOtherRemoteTracks = await this.getAllRemoteTracksForSession(sessionId);
 
 		if (allOtherRemoteTracks.length === 0) {
 			return null;
@@ -127,16 +150,19 @@ export class Signaling extends Server<Env> {
 
 		const offer = await sessionManager.pushRemoteTracks({ tracks: allOtherRemoteTracks });
 
-		this.#db.insert(track).values(
-			allOtherRemoteTracks.map((t) => {
-				return { location: 'remote', name: t.name, sessionId: sessionId, remoteSessionId: t.sessionId };
+		await this.#db.insert(track).values(
+			offer.remoteTracks.map((t) => {
+				return { location: 'remote', mId: t.mId, name: t.trackName, sessionId: sessionId, remoteSessionId: t.remoteSessionId };
 			})
 		);
 
 		return offer;
 	}
 
-	async getAllRemoteTracks(sessionId: string) {
+	/**
+	 * Finds all the tracks which should be an remote track for a given sessionId
+	 */
+	async getAllRemoteTracksForSession(sessionId: string) {
 		const allTracks = this.#db
 			.select()
 			.from(track)
