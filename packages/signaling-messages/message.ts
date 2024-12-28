@@ -28,9 +28,15 @@ export const RtcOffer = z.object({
   sdp: z.string(),
 });
 
+export const RemoveTrackMessage = z.object({
+  type: z.literal("removeTrack"),
+  mId: z.string(),
+});
+
 export const ServerSentMessages = z.discriminatedUnion("type", [
   RtcAnswer,
   RtcOffer,
+  RemoveTrackMessage,
 ]);
 
 export type ServerSentMessages = z.infer<typeof ServerSentMessages>;

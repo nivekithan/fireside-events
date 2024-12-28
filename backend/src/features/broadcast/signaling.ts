@@ -39,7 +39,7 @@ export class Signaling extends Server<Env> {
 		}
 
 		// Deletes all local tracks associated with the deleted sesssion
-		const localTracks = await this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId)).returning();
+		const localTracks = this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId)).returning().all();
 
 		const sessionManangerId = this.env.SessionManager.idFromName(publicId);
 
@@ -54,6 +54,46 @@ export class Signaling extends Server<Env> {
 		});
 
 		await sessionMananger.deleteLocalTracks(trackMids);
+
+		const deletedRemoteTracks = this.#db.delete(track).where(eq(track.remoteSessionId, deletedRow.sessionId)).returning().all();
+
+		const deletedRemoteTracksGroupedBySessionId = Object.groupBy(deletedRemoteTracks, (t) => t.sessionId);
+		const allSessionsToBeInformed = Object.keys(deletedRemoteTracksGroupedBySessionId);
+
+		for (const sessionId of allSessionsToBeInformed) {
+			const tracksMidsToBeRemoved = deletedRemoteTracksGroupedBySessionId[sessionId]?.map((r) => r.mId);
+
+			if (!tracksMidsToBeRemoved) {
+				throw new Error(`[UNREACHABLE] tracksMidsToBeRemoved must always be definied`);
+			}
+
+			const publicIdOfSessionList = this.#db
+				.select({ publicId: publicIdToSessionId.publicId })
+				.from(publicIdToSessionId)
+				.where(eq(publicIdToSessionId.sessionId, sessionId))
+				.all();
+
+			if (publicIdOfSessionList.length === 0) {
+				continue; // Ignore it
+			}
+
+			if (publicIdOfSessionList.length !== 1) {
+				throw new Error(`[UNREACHABLE] Found more than one publicId`);
+			}
+
+			const { publicId } = publicIdOfSessionList[0];
+
+			const connection = this.getConnection(publicId);
+
+			if (!connection) {
+				console.warn(`Unable to get connection with publicId: ${publicId}`);
+				continue;
+			}
+
+			tracksMidsToBeRemoved.forEach((mId) => {
+				this.#sendMessageToConnection(connection, { type: 'removeTrack', mId: mId });
+			});
+		}
 	}
 
 	async onMessage(connection: Connection, message: WSMessage): Promise<void> {

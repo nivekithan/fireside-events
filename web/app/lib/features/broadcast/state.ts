@@ -9,7 +9,11 @@ export type BroadcastMachineEvents =
   | { type: "permissionPending" }
   | { type: "rtcAnswer"; sdp: string }
   | { type: "rtcOffer"; sdp: string }
-  | { type: "newMediaStream"; mediaStream: MediaStream };
+  | {
+      type: "newMediaStream";
+      mediaStream: { mediaStream: MediaStream; trackMids: string[] };
+    }
+  | { type: "removeTrack"; mId: string };
 
 export const broadcastMachine = setup({
   guards: {
@@ -32,7 +36,10 @@ export const broadcastMachine = setup({
         answer: string | null;
         offer: string | null;
       };
-      remoteMediaStreams: Array<MediaStream>;
+      remoteMediaStreams: Array<{
+        mediaStream: MediaStream;
+        trackMids: string[];
+      }>;
     },
     events: {} as BroadcastMachineEvents,
   },
@@ -40,11 +47,16 @@ export const broadcastMachine = setup({
     logUnhandledEvent: ({ event }) => {
       console.log(`Unhandled Event: `, event);
     },
-    setNewMediaStream: assign(({ context }, mediaStream: MediaStream) => {
-      return {
-        remoteMediaStreams: [...context.remoteMediaStreams, mediaStream],
-      };
-    }),
+    setNewMediaStream: assign(
+      (
+        { context },
+        mediaStream: { mediaStream: MediaStream; trackMids: string[] }
+      ) => {
+        return {
+          remoteMediaStreams: [...context.remoteMediaStreams, mediaStream],
+        };
+      }
+    ),
     setOffer: assign(({ context }, offer: string) => {
       return { internal: { ...context.internal, offer: offer } };
     }),
@@ -121,6 +133,25 @@ export const broadcastMachine = setup({
         return context;
       }
     ),
+    stopTransrecvicer({ context }, mId: string) {
+      const rtcPeerConnection = context.rtcPeerConnection;
+
+      invariant(
+        rtcPeerConnection,
+        `Expected RTCPeerConnection to be initalized`
+      );
+
+      const transreciver = rtcPeerConnection.getTransceivers().find((t) => {
+        return t.mid === mId;
+      });
+
+      if (!transreciver) {
+        throw new Error(`Expected transreciver to be found`);
+      }
+
+      transreciver.stop();
+      console.log(`Stopped transreciver with mId: ${mId}`);
+    },
   },
   actors: {
     setOfferToRTCPeerConnection: fromPromise(
@@ -193,6 +224,7 @@ export const broadcastMachine = setup({
         signal: AbortSignal;
       }) => {
         function handleNewRemoteTrack(e: RTCTrackEvent) {
+          console.log("New track event");
           if (e.transceiver.direction !== "recvonly") {
             // Since direction is not recvonly it means the track is not of remote
             // so we can ignore this event
@@ -200,6 +232,11 @@ export const broadcastMachine = setup({
           }
 
           const newMediaStream = new MediaStream();
+          const mId = e.transceiver.mid;
+
+          if (!mId) {
+            throw new Error(`There is no mid to idenitfy the transreciver`);
+          }
 
           console.log(
             `Adding new Remote track`,
@@ -212,14 +249,26 @@ export const broadcastMachine = setup({
 
           parentMachine.send({
             type: "newMediaStream",
-            mediaStream: newMediaStream,
+            mediaStream: { mediaStream: newMediaStream, trackMids: [mId] },
           } satisfies BroadcastMachineEvents);
         }
 
+        function onNegotiationNeeded() {
+          console.log("Negotiation needed");
+        }
+
         rtcPeerConnection.addEventListener("track", handleNewRemoteTrack);
+        rtcPeerConnection.addEventListener(
+          "negotiationneeded",
+          onNegotiationNeeded
+        );
 
         signal.onabort = () => {
           rtcPeerConnection.removeEventListener("track", handleNewRemoteTrack);
+          rtcPeerConnection.removeEventListener(
+            "negotiationneeded",
+            onNegotiationNeeded
+          );
         };
       }
     ),
@@ -563,6 +612,14 @@ export const broadcastMachine = setup({
                 },
               },
               target: "processingOffer",
+            },
+            removeTrack: {
+              actions: {
+                type: "stopTransrecvicer",
+                params({ context, event }) {
+                  return event.mId;
+                },
+              },
             },
           },
         },

@@ -84,12 +84,28 @@ function Broadcasting({
   const remoteMediaStreams = snapshot.context.remoteMediaStreams;
   const rtcConnection = snapshot.context.rtcPeerConnection;
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const transceivers = rtcConnection?.getTransceivers();
+      console.log({
+        rtcConnection,
+        remoteMediaStreams,
+        mediaStream,
+        transceivers,
+      });
+    }, 5_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [mediaStream, remoteMediaStreams, rtcConnection]);
+
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
       <MediaStream mediaStream={mediaStream} />
-      {remoteMediaStreams.map((mediaStream) => {
+      {remoteMediaStreams.map(({ mediaStream }) => {
         return <MediaStream mediaStream={mediaStream} key={mediaStream.id} />;
       })}
     </div>

@@ -60,6 +60,8 @@ export class SignalingServer {
         this.#sendEvent({ type: "rtcAnswer", sdp: parsedMessage.sdp });
       } else if (parsedMessage.type === "rtcOffer") {
         this.#sendEvent({ type: "rtcOffer", sdp: parsedMessage.sdp });
+      } else if (parsedMessage.type === "removeTrack") {
+        this.#sendEvent({ type: "removeTrack", mId: parsedMessage.mId });
       }
     };
   }
