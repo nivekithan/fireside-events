@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { createCallsSession, getCallsClient } from '../externalServices/calls';
-import { createNewSessionIdentityToken, verifySessionIdentiyToken } from './identity';
+import { createCallsSession, getCallsClient } from '../../externalServices/calls';
+import { createNewSessionIdentityToken, verifySessionIdentiyToken } from '../identity';
 
 const SessionIdentitySchema = z.object({
 	'x-session-identity-token': z.string(),
