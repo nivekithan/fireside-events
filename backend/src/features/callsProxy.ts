@@ -9,8 +9,8 @@ const SessionIdentitySchema = z.object({
 });
 
 export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
-	.post('/sessions/new', zValidator('json', z.object({ userSessionId: z.string() })), async (c) => {
-		const { userSessionId } = c.req.valid('json');
+	.post('/sessions/new', zValidator('json', z.object({ userSessionId: z.string(), room: z.string() })), async (c) => {
+		const { userSessionId, room } = c.req.valid('json');
 
 		const callsClient = getCallsClient(c.env.CALLS_API_TOKEN);
 		const sessionId = await createCallsSession({ appId: c.env.CALLS_APP_ID, callsClient });
@@ -19,6 +19,7 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 			callsSessionId: sessionId,
 			jwtSecret: c.env.JWT_SECRET,
 			userSessionId,
+			room,
 		});
 
 		return c.json({ ok: true, data: { sessionIdentityToken: sessionIdenityToken } } as const);

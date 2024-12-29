@@ -6,6 +6,7 @@ const SessionIdenityPayloadSchema = z.object({
 	sub: z.string(),
 	callsSessionId: z.string(),
 	exp: z.number(),
+	room: z.string(),
 });
 
 export type SessionIdenityPayload = z.infer<typeof SessionIdenityPayloadSchema>;
@@ -14,15 +15,17 @@ export async function createNewSessionIdentityToken({
 	callsSessionId,
 	userSessionId,
 	jwtSecret,
+	room,
 }: {
 	userSessionId: string;
 	callsSessionId: string;
 	jwtSecret: string;
+	room: string;
 }) {
 	const after1Day = DateTime.utc().plus({ day: 1 }).toSeconds();
 
 	const result = await sign(
-		{ sub: userSessionId, callsSessionId: callsSessionId, exp: after1Day } satisfies SessionIdenityPayload,
+		{ sub: userSessionId, room, callsSessionId: callsSessionId, exp: after1Day } satisfies SessionIdenityPayload,
 		jwtSecret
 	);
 
@@ -36,7 +39,7 @@ export async function verifySessionIdentiyToken({ token, jwtSecret }: { jwtSecre
 		throw new Error(`Invalid session identity token`);
 	}
 
-	const { callsSessionId, sub } = SessionIdenityPayloadSchema.parse(parsedToken.payload);
+	const { callsSessionId, sub, room } = SessionIdenityPayloadSchema.parse(parsedToken.payload);
 
-	return { userSessionId: sub, callsSessionId };
+	return { userSessionId: sub, callsSessionId, room: room };
 }

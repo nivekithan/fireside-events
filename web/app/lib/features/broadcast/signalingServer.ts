@@ -4,6 +4,7 @@ import { AnyActorRef } from "xstate";
 import type { BroadcastMachineEvents } from "./state";
 
 export class SignalingServer {
+  static DEFAULT_ROOM: "DEFAULT";
   // #room: string;
   // #id: string;
   #partySocket: PartySocket;

@@ -81,7 +81,7 @@ export const broadcastMachine = setup({
 
     listenToSignalingServer: assign(({ self }) => {
       const signalingServer = new SignalingServer({
-        room: "DEFAULT",
+        room: SignalingServer.DEFAULT_ROOM,
         id: getPublicId(),
         parentMachine: self,
       });
@@ -302,7 +302,10 @@ export const broadcastMachine = setup({
     broadcastLocalMediaStream: fromPromise(
       async ({ input }: { input: { mediaStream: MediaStream } }) => {
         const sessionIdentityTokenRes = await bk.calls.sessions.new.$post({
-          json: { userSessionId: getPublicId() },
+          json: {
+            userSessionId: getPublicId(),
+            room: SignalingServer.DEFAULT_ROOM,
+          },
         });
 
         const sessionIdentityToken = (await sessionIdentityTokenRes.json()).data
