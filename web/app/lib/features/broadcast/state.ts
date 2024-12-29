@@ -2,6 +2,7 @@ import { AnyActorRef, assign, fromPromise, setup, spawnChild } from "xstate";
 import { SignalingServer } from "./signalingServer";
 import { getPublicId } from "../identity";
 import invariant from "tiny-invariant";
+import { bk } from "../bk";
 
 export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
@@ -32,6 +33,7 @@ export const broadcastMachine = setup({
       localMediaStream: null | MediaStream;
       signalingServer: SignalingServer | null;
       rtcPeerConnection: null | RTCPeerConnection;
+      sessionIdentityToken: string | null;
       internal: {
         answer: string | null;
         offer: string | null;
@@ -65,30 +67,14 @@ export const broadcastMachine = setup({
       return { internal: { ...context.internal, answer } };
     }),
 
-    pushLocalTracks(
-      { context },
-      {
-        localOffer,
-        transrecivers,
-      }: {
-        localOffer: RTCLocalSessionDescriptionInit;
-        transrecivers: Array<RTCRtpTransceiver>;
-      }
-    ) {
-      const signalingServer = context.signalingServer;
-      if (!signalingServer) {
-        throw new Error(`Expected Signaling Server to be initalized`);
-      }
-      signalingServer.pushLocalTrack({
-        localOffer: localOffer,
-        transreviers: transrecivers,
-      });
-    },
     assignRtcPeerConnection: assign(
       (_, rtcPeerConnection: RTCPeerConnection) => {
         return { rtcPeerConnection: rtcPeerConnection };
       }
     ),
+    assignSessionIdentityToken: assign((_, sessionIdentityToken: string) => {
+      return { sessionIdentityToken };
+    }),
     updateLocalMediaStream: assign((_, mediaStream: MediaStream) => {
       return { localMediaStream: mediaStream };
     }),
@@ -315,6 +301,13 @@ export const broadcastMachine = setup({
 
     broadcastLocalMediaStream: fromPromise(
       async ({ input }: { input: { mediaStream: MediaStream } }) => {
+        const sessionIdentityTokenRes = await bk.calls.sessions.new.$post({
+          json: { userSessionId: getPublicId() },
+        });
+
+        const sessionIdentityToken = (await sessionIdentityTokenRes.json()).data
+          .sessionIdentityToken;
+
         const localMediaStream = input.mediaStream;
 
         const rtcConnection = new RTCPeerConnection({
@@ -330,11 +323,52 @@ export const broadcastMachine = setup({
           return rtcConnection.addTransceiver(t, { direction: "sendonly" });
         });
 
+        const tracks = transrecivers.map((t) => {
+          const mid = t.mid;
+          const trackName = t.sender.track?.id;
+
+          if (!mid || !trackName) {
+            throw new Error(`Expected mid and trackName to be defined`);
+          }
+
+          return { location: "local", mid, trackName } as const;
+        });
+
         const localOffer = await rtcConnection.createOffer();
+        const sdp = localOffer.sdp;
+
+        if (!sdp) {
+          throw new Error(`Expected sdp to be generated`);
+        }
 
         await rtcConnection.setLocalDescription(localOffer);
 
-        return { localOffer, rtcConnection, transrecivers };
+        const pushLocalTracksRes = await bk.calls.tracks.new.$post({
+          header: { "x-session-identity-token": sessionIdentityToken },
+          json: {
+            sessionDesciption: { type: "offer", sdp: sdp },
+            tracks: tracks,
+          },
+        });
+
+        const pushLocalTracksData = await pushLocalTracksRes.json();
+
+        if (!pushLocalTracksData.data) {
+          throw new Error(`Expected data to be returned from pushLocalTracks`);
+        }
+
+        const answerSdp = pushLocalTracksData.data.sessionDescription?.sdp;
+
+        if (!answerSdp) {
+          throw new Error(`Expected answer sdp to be returned`);
+        }
+
+        await rtcConnection.setRemoteDescription({
+          type: "answer",
+          sdp: answerSdp,
+        });
+
+        return { sessionIdentityToken, rtcConnection, transrecivers };
       }
     ),
   },
@@ -344,6 +378,7 @@ export const broadcastMachine = setup({
   context: {
     localMediaStream: null,
     signalingServer: null,
+    sessionIdentityToken: null,
     rtcPeerConnection: null,
     internal: {
       answer: null,
@@ -471,11 +506,12 @@ export const broadcastMachine = setup({
           },
         },
       },
-      initial: "creatingOffer",
+      initial: "joiningRoom",
       states: {
-        creatingOffer: {
+        joiningRoom: {
           invoke: {
             src: "broadcastLocalMediaStream",
+
             input: ({ context }) => {
               if (!context.localMediaStream) {
                 throw new Error(`Expected localMediaStream to be initialized`);
@@ -492,29 +528,27 @@ export const broadcastMachine = setup({
                   },
                 },
                 {
-                  type: "spawnRemoteTracksListener",
+                  type: "assignSessionIdentityToken",
                   params({ event }) {
-                    return event.output.rtcConnection;
+                    return event.output.sessionIdentityToken;
                   },
                 },
                 {
-                  type: "pushLocalTracks",
+                  type: "spawnRemoteTracksListener",
                   params({ event }) {
-                    return {
-                      localOffer: event.output.localOffer,
-                      transrecivers: event.output.transrecivers,
-                    };
+                    return event.output.rtcConnection;
                   },
                 },
               ],
               target: "waitingForReply",
             },
             onError: {
-              target: "unableToCreateOffer",
+              target: "unableToJoinRoom",
             },
           },
         },
-        unableToCreateOffer: {},
+        unableToJoinRoom: {},
+
         waitingForReply: {
           on: {
             rtcAnswer: {
