@@ -1,217 +1,217 @@
-import { Connection, Server, WSMessage } from 'partyserver';
-import { ClientSentMessages, ServerSentMessages } from 'signaling-messages';
-import migrations from '../../../migrations/signalingDb/migrations';
-import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
-import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
-import { publicIdToSessionId, track } from './signalingDb/schema';
-import { and, eq, ne } from 'drizzle-orm';
-import { SessionManager } from './sessionManager';
+// import { Connection, Server, WSMessage } from 'partyserver';
+// import { ClientSentMessages, ServerSentMessages } from 'signaling-messages';
+// import migrations from '../../../migrations/signalingDb/migrations';
+// import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+// import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+// import { publicIdToSessionId, track } from './signalingDb/schema';
+// import { and, eq, ne } from 'drizzle-orm';
+// import { SessionManager } from './roomManager/roomManager';
 
-export class Signaling extends Server<Env> {
-	#db: DrizzleSqliteDODatabase<any>;
-	constructor(ctx: DurableObjectState, env: Env) {
-		super(ctx, env);
+// export class Signaling extends Server<Env> {
+// 	#db: DrizzleSqliteDODatabase<any>;
+// 	constructor(ctx: DurableObjectState, env: Env) {
+// 		super(ctx, env);
 
-		this.#db = drizzle(this.ctx.storage, { logger: false });
-	}
+// 		this.#db = drizzle(this.ctx.storage, { logger: false });
+// 	}
 
-	async migrate() {
-		return migrate(this.#db, migrations);
-	}
+// 	async migrate() {
+// 		return migrate(this.#db, migrations);
+// 	}
 
-	async onStart(): Promise<void> {
-		return this.migrate();
-	}
+// 	async onStart(): Promise<void> {
+// 		return this.migrate();
+// 	}
 
-	async onClose(connection: Connection): Promise<void> {
-		const publicId = connection.id;
+// 	async onClose(connection: Connection): Promise<void> {
+// 		const publicId = connection.id;
 
-		const deletedRows = await this.#db.delete(publicIdToSessionId).where(eq(publicIdToSessionId.publicId, publicId)).returning();
+// 		const deletedRows = await this.#db.delete(publicIdToSessionId).where(eq(publicIdToSessionId.publicId, publicId)).returning();
 
-		if (deletedRows.length > 1) {
-			throw new Error(`Expected deleted Rows to be less than or equal to 1`);
-		}
+// 		if (deletedRows.length > 1) {
+// 			throw new Error(`Expected deleted Rows to be less than or equal to 1`);
+// 		}
 
-		const deletedRow = deletedRows[0];
+// 		const deletedRow = deletedRows[0];
 
-		if (!deletedRow) {
-			return;
-		}
+// 		if (!deletedRow) {
+// 			return;
+// 		}
 
-		// Deletes all local tracks associated with the deleted sesssion
-		const localTracks = this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId)).returning().all();
+// 		// Deletes all local tracks associated with the deleted sesssion
+// 		const localTracks = this.#db.delete(track).where(eq(track.sessionId, deletedRow.sessionId)).returning().all();
 
-		const sessionManangerId = this.env.SessionManager.idFromName(publicId);
+// 		const sessionManangerId = this.env.SessionManager.idFromName(publicId);
 
-		const sessionMananger = this.env.SessionManager.get(sessionManangerId);
+// 		const sessionMananger = this.env.SessionManager.get(sessionManangerId);
 
-		const trackMids = localTracks.map((t) => {
-			if (!t.mId) {
-				throw new Error(`There is no mId on track`);
-			}
+// 		const trackMids = localTracks.map((t) => {
+// 			if (!t.mId) {
+// 				throw new Error(`There is no mId on track`);
+// 			}
 
-			return { mId: t.mId };
-		});
+// 			return { mId: t.mId };
+// 		});
 
-		await sessionMananger.deleteLocalTracks(trackMids);
+// 		await sessionMananger.deleteLocalTracks(trackMids);
 
-		const deletedRemoteTracks = this.#db.delete(track).where(eq(track.remoteSessionId, deletedRow.sessionId)).returning().all();
+// 		const deletedRemoteTracks = this.#db.delete(track).where(eq(track.remoteSessionId, deletedRow.sessionId)).returning().all();
 
-		const deletedRemoteTracksGroupedBySessionId = Object.groupBy(deletedRemoteTracks, (t) => t.sessionId);
-		const allSessionsToBeInformed = Object.keys(deletedRemoteTracksGroupedBySessionId);
+// 		const deletedRemoteTracksGroupedBySessionId = Object.groupBy(deletedRemoteTracks, (t) => t.sessionId);
+// 		const allSessionsToBeInformed = Object.keys(deletedRemoteTracksGroupedBySessionId);
 
-		for (const sessionId of allSessionsToBeInformed) {
-			const tracksMidsToBeRemoved = deletedRemoteTracksGroupedBySessionId[sessionId]?.map((r) => r.mId);
+// 		for (const sessionId of allSessionsToBeInformed) {
+// 			const tracksMidsToBeRemoved = deletedRemoteTracksGroupedBySessionId[sessionId]?.map((r) => r.mId);
 
-			if (!tracksMidsToBeRemoved) {
-				throw new Error(`[UNREACHABLE] tracksMidsToBeRemoved must always be definied`);
-			}
+// 			if (!tracksMidsToBeRemoved) {
+// 				throw new Error(`[UNREACHABLE] tracksMidsToBeRemoved must always be definied`);
+// 			}
 
-			const publicIdOfSessionList = this.#db
-				.select({ publicId: publicIdToSessionId.publicId })
-				.from(publicIdToSessionId)
-				.where(eq(publicIdToSessionId.sessionId, sessionId))
-				.all();
+// 			const publicIdOfSessionList = this.#db
+// 				.select({ publicId: publicIdToSessionId.publicId })
+// 				.from(publicIdToSessionId)
+// 				.where(eq(publicIdToSessionId.sessionId, sessionId))
+// 				.all();
 
-			if (publicIdOfSessionList.length === 0) {
-				continue; // Ignore it
-			}
+// 			if (publicIdOfSessionList.length === 0) {
+// 				continue; // Ignore it
+// 			}
 
-			if (publicIdOfSessionList.length !== 1) {
-				throw new Error(`[UNREACHABLE] Found more than one publicId`);
-			}
+// 			if (publicIdOfSessionList.length !== 1) {
+// 				throw new Error(`[UNREACHABLE] Found more than one publicId`);
+// 			}
 
-			const { publicId } = publicIdOfSessionList[0];
+// 			const { publicId } = publicIdOfSessionList[0];
 
-			const connection = this.getConnection(publicId);
+// 			const connection = this.getConnection(publicId);
 
-			if (!connection) {
-				console.warn(`Unable to get connection with publicId: ${publicId}`);
-				continue;
-			}
+// 			if (!connection) {
+// 				console.warn(`Unable to get connection with publicId: ${publicId}`);
+// 				continue;
+// 			}
 
-			tracksMidsToBeRemoved.forEach((mId) => {
-				this.#sendMessageToConnection(connection, { type: 'removeTrack', mId: mId });
-			});
-		}
-	}
+// 			tracksMidsToBeRemoved.forEach((mId) => {
+// 				this.#sendMessageToConnection(connection, { type: 'removeTrack', mId: mId });
+// 			});
+// 		}
+// 	}
 
-	async onMessage(connection: Connection, message: WSMessage): Promise<void> {
-		const publicId = connection.id;
+// 	async onMessage(connection: Connection, message: WSMessage): Promise<void> {
+// 		const publicId = connection.id;
 
-		if (typeof message !== 'string') {
-			throw new Error(`Signaling server got unsupported message type. Message must be of type of String`);
-		}
+// 		if (typeof message !== 'string') {
+// 			throw new Error(`Signaling server got unsupported message type. Message must be of type of String`);
+// 		}
 
-		const parsedMessages = ClientSentMessages.parse(JSON.parse(message));
+// 		const parsedMessages = ClientSentMessages.parse(JSON.parse(message));
 
-		const sessionManagerId = this.env.SessionManager.idFromName(publicId);
-		const sessionManager = this.env.SessionManager.get(sessionManagerId);
+// 		const sessionManagerId = this.env.SessionManager.idFromName(publicId);
+// 		const sessionManager = this.env.SessionManager.get(sessionManagerId);
 
-		if (parsedMessages.type === 'pushTrack') {
-			const pushLocalTracksResponse = await sessionManager.pushLocalTracks({
-				sdp: parsedMessages.sdp,
-				tracks: parsedMessages.tracks,
-			});
+// 		if (parsedMessages.type === 'pushTrack') {
+// 			const pushLocalTracksResponse = await sessionManager.pushLocalTracks({
+// 				sdp: parsedMessages.sdp,
+// 				tracks: parsedMessages.tracks,
+// 			});
 
-			this.#sendMessageToConnection(connection, {
-				type: 'rtcAnswer',
-				sdp: pushLocalTracksResponse.sdp,
-			});
+// 			this.#sendMessageToConnection(connection, {
+// 				type: 'rtcAnswer',
+// 				sdp: pushLocalTracksResponse.sdp,
+// 			});
 
-			await this.#db.insert(publicIdToSessionId).values({ publicId: publicId, sessionId: pushLocalTracksResponse.sessionId });
-			await this.#db.insert(track).values(
-				parsedMessages.tracks.map((t) => {
-					return { location: 'local', name: t.name, sessionId: pushLocalTracksResponse.sessionId, mId: t.mId };
-				})
-			);
+// 			await this.#db.insert(publicIdToSessionId).values({ publicId: publicId, sessionId: pushLocalTracksResponse.sessionId });
+// 			await this.#db.insert(track).values(
+// 				parsedMessages.tracks.map((t) => {
+// 					return { location: 'local', name: t.name, sessionId: pushLocalTracksResponse.sessionId, mId: t.mId };
+// 				})
+// 			);
 
-			// Add's any other tracks to the current session as remote tracks
-			const newOffer = await this.newOfferForOtherTracks({ sessionId: pushLocalTracksResponse.sessionId, sessionManager: sessionManager });
+// 			// Add's any other tracks to the current session as remote tracks
+// 			const newOffer = await this.newOfferForOtherTracks({ sessionId: pushLocalTracksResponse.sessionId, sessionManager: sessionManager });
 
-			if (newOffer) {
-				this.#sendMessageToConnection(connection, {
-					type: 'rtcOffer',
-					sdp: newOffer.sdp,
-				});
-			}
+// 			if (newOffer) {
+// 				this.#sendMessageToConnection(connection, {
+// 					type: 'rtcOffer',
+// 					sdp: newOffer.sdp,
+// 				});
+// 			}
 
-			const singletrack = parsedMessages.tracks[0];
-			await this.informAboutNewLocalTrack({ name: singletrack.name, remoteSessionId: pushLocalTracksResponse.sessionId });
-		} else if (parsedMessages.type === 'rtcAnswer') {
-			await sessionManager.renegotiateAnswer({ sdp: parsedMessages.sdp });
-		}
-	}
+// 			const singletrack = parsedMessages.tracks[0];
+// 			await this.informAboutNewLocalTrack({ name: singletrack.name, remoteSessionId: pushLocalTracksResponse.sessionId });
+// 		} else if (parsedMessages.type === 'rtcAnswer') {
+// 			await sessionManager.renegotiateAnswer({ sdp: parsedMessages.sdp });
+// 		}
+// 	}
 
-	async informAboutNewLocalTrack({ name, remoteSessionId }: { remoteSessionId: string; name: string }) {
-		const allOtherPublicId = await this.#db.select().from(publicIdToSessionId).where(ne(publicIdToSessionId.sessionId, remoteSessionId));
+// 	async informAboutNewLocalTrack({ name, remoteSessionId }: { remoteSessionId: string; name: string }) {
+// 		const allOtherPublicId = await this.#db.select().from(publicIdToSessionId).where(ne(publicIdToSessionId.sessionId, remoteSessionId));
 
-		if (allOtherPublicId.length === 0) {
-			return;
-		}
+// 		if (allOtherPublicId.length === 0) {
+// 			return;
+// 		}
 
-		const newOffers = await Promise.all(
-			allOtherPublicId.map(async ({ publicId, sessionId }) => {
-				const sessionManagerId = this.env.SessionManager.idFromName(publicId);
-				const sessionManager = this.env.SessionManager.get(sessionManagerId);
+// 		const newOffers = await Promise.all(
+// 			allOtherPublicId.map(async ({ publicId, sessionId }) => {
+// 				const sessionManagerId = this.env.SessionManager.idFromName(publicId);
+// 				const sessionManager = this.env.SessionManager.get(sessionManagerId);
 
-				const offer = await sessionManager.pushRemoteTracks({ tracks: [{ name: name, sessionId: remoteSessionId }] });
+// 				const offer = await sessionManager.pushRemoteTracks({ tracks: [{ name: name, sessionId: remoteSessionId }] });
 
-				await this.#db.insert(track).values(
-					offer.remoteTracks.map((t) => {
-						return { remoteSessionId: t.remoteSessionId, sessionId: sessionId, location: 'remote', mId: t.mId, name: t.trackName };
-					})
-				);
+// 				await this.#db.insert(track).values(
+// 					offer.remoteTracks.map((t) => {
+// 						return { remoteSessionId: t.remoteSessionId, sessionId: sessionId, location: 'remote', mId: t.mId, name: t.trackName };
+// 					})
+// 				);
 
-				return { offer: offer, publicId };
-			})
-		);
+// 				return { offer: offer, publicId };
+// 			})
+// 		);
 
-		newOffers.forEach(({ offer, publicId }) => {
-			const connection = this.getConnection(publicId);
+// 		newOffers.forEach(({ offer, publicId }) => {
+// 			const connection = this.getConnection(publicId);
 
-			if (!connection) {
-				return;
-			}
+// 			if (!connection) {
+// 				return;
+// 			}
 
-			this.#sendMessageToConnection(connection, {
-				type: 'rtcOffer',
-				sdp: offer.sdp,
-			});
-		});
-	}
+// 			this.#sendMessageToConnection(connection, {
+// 				type: 'rtcOffer',
+// 				sdp: offer.sdp,
+// 			});
+// 		});
+// 	}
 
-	async newOfferForOtherTracks({ sessionId, sessionManager }: { sessionManager: DurableObjectStub<SessionManager>; sessionId: string }) {
-		const allOtherRemoteTracks = await this.getAllRemoteTracksForSession(sessionId);
+// 	async newOfferForOtherTracks({ sessionId, sessionManager }: { sessionManager: DurableObjectStub<SessionManager>; sessionId: string }) {
+// 		const allOtherRemoteTracks = await this.getAllRemoteTracksForSession(sessionId);
 
-		if (allOtherRemoteTracks.length === 0) {
-			return null;
-		}
+// 		if (allOtherRemoteTracks.length === 0) {
+// 			return null;
+// 		}
 
-		const offer = await sessionManager.pushRemoteTracks({ tracks: allOtherRemoteTracks });
+// 		const offer = await sessionManager.pushRemoteTracks({ tracks: allOtherRemoteTracks });
 
-		await this.#db.insert(track).values(
-			offer.remoteTracks.map((t) => {
-				return { location: 'remote', mId: t.mId, name: t.trackName, sessionId: sessionId, remoteSessionId: t.remoteSessionId };
-			})
-		);
+// 		await this.#db.insert(track).values(
+// 			offer.remoteTracks.map((t) => {
+// 				return { location: 'remote', mId: t.mId, name: t.trackName, sessionId: sessionId, remoteSessionId: t.remoteSessionId };
+// 			})
+// 		);
 
-		return offer;
-	}
+// 		return offer;
+// 	}
 
-	/**
-	 * Finds all the tracks which should be an remote track for a given sessionId
-	 */
-	async getAllRemoteTracksForSession(sessionId: string) {
-		const allTracks = this.#db
-			.select()
-			.from(track)
-			.where(and(ne(track.sessionId, sessionId), eq(track.location, 'local')));
+// 	/**
+// 	 * Finds all the tracks which should be an remote track for a given sessionId
+// 	 */
+// 	async getAllRemoteTracksForSession(sessionId: string) {
+// 		const allTracks = this.#db
+// 			.select()
+// 			.from(track)
+// 			.where(and(ne(track.sessionId, sessionId), eq(track.location, 'local')));
 
-		return allTracks;
-	}
+// 		return allTracks;
+// 	}
 
-	#sendMessageToConnection(connection: Connection, message: ServerSentMessages) {
-		return connection.send(JSON.stringify(message));
-	}
-}
+// 	#sendMessageToConnection(connection: Connection, message: ServerSentMessages) {
+// 		return connection.send(JSON.stringify(message));
+// 	}
+// }

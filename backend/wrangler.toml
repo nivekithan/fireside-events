@@ -56,19 +56,21 @@ CALLS_APP_ID= "3fb2121269d353478250f1dbd988735c"
 # Bind a Durable Object. Durable objects are a scale-to-zero compute primitive based on the actor model.
 # Durable Objects can live for as long as needed. Use these when you need a long-running "server", such as in realtime apps.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#durable-objects
-[[durable_objects.bindings]]
-name = "Signaling"
-class_name = "Signaling"
 
 [[durable_objects.bindings]]
-name = "SessionManager"
-class_name = "SessionManager"
+name = "RoomManager"
+class_name = "RoomManager"
 
 # Durable Object migrations.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#migrations
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Signaling", "SessionManager"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["Signaling", "SessionManager"]
+new_sqlite_classes = ["RoomManager"]
 
 # Bind a Hyperdrive configuration. Use to accelerate access to your existing databases from Cloudflare Workers.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#hyperdrive

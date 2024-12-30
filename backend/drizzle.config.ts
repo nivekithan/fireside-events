@@ -3,6 +3,7 @@ import { defineConfig } from 'drizzle-kit';
 export default defineConfig({
 	dialect: 'sqlite',
 	driver: 'durable-sqlite',
-	out: 'migrations/signalingDb',
-	schema: './src/features/broadcast/signalingDb/schema.ts',
+	out: 'migrations/callsSessionManager',
+	schema: './src/features/broadcast/callsSessionManager/schema.ts',
+	casing: 'snake_case',
 });

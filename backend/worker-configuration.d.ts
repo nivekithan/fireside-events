@@ -5,8 +5,7 @@ interface Env {
 	CALLS_API_TOKEN: string;
 	DB_URL: string;
 	JWT_SECRET: string;
-	Signaling: DurableObjectNamespace<import("./src/index").Signaling>;
-	SessionManager: DurableObjectNamespace<import("./src/index").SessionManager>;
+	RoomManager: DurableObjectNamespace<import("./src/index").RoomManager>;
 }
 declare module "*.sql" {
 	const value: string;

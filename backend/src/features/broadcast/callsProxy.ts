@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { createCallsSession, getCallsClient } from '../../externalServices/calls';
 import { createNewSessionIdentityToken, verifySessionIdentiyToken } from '../identity';
+import { Tracks } from './roomManager/roomManager';
 
 const SessionIdentitySchema = z.object({
 	'x-session-identity-token': z.string(),
@@ -42,7 +43,7 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 		async (c) => {
 			const sessionIdentityToken = c.req.valid('header')['x-session-identity-token'];
 
-			const { callsSessionId } = await verifySessionIdentiyToken({
+			const { callsSessionId, room } = await verifySessionIdentiyToken({
 				jwtSecret: c.env.JWT_SECRET,
 				token: sessionIdentityToken,
 			});
@@ -59,6 +60,35 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 				},
 				body: payload,
 			});
+
+			const tracks = response.data?.tracks;
+
+			if (!tracks) {
+				return c.json({ data: response.data, error: response.error });
+			}
+
+			const localTracksToBeAdded: Array<Tracks> = [];
+
+			for (const t of tracks) {
+				if (t.location !== 'local' || t.error) {
+					continue;
+				}
+
+				const mid = t.mid;
+				const name = t.trackName;
+				const sessionId = t.sessionId;
+
+				if (!mid || !name || !sessionId) {
+					throw new Error('Invalid track data');
+				}
+
+				localTracksToBeAdded.push({ mid, name, sessionId });
+			}
+
+			const roomManagerId = c.env.RoomManager.idFromName(room);
+			const roomManager = c.env.RoomManager.get(roomManagerId);
+
+			await roomManager.addTracks(localTracksToBeAdded);
 
 			return c.json({ data: response.data, error: response.error });
 		}
@@ -131,4 +161,19 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 
 			return c.json({ data: response.data, error: response.error });
 		}
-	);
+	)
+	.get('/local_tracks', zValidator('header', SessionIdentitySchema), async (c) => {
+		const sessionIdentityToken = c.req.valid('header')['x-session-identity-token'];
+
+		const { room } = await verifySessionIdentiyToken({
+			jwtSecret: c.env.JWT_SECRET,
+			token: sessionIdentityToken,
+		});
+
+		const roomManagerId = c.env.RoomManager.idFromName(room);
+		const roomManager = c.env.RoomManager.get(roomManagerId);
+
+		const tracks = await roomManager.getAllLocalTracks();
+
+		return c.json({ tracks });
+	});
