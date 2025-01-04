@@ -1,11 +1,11 @@
-import { DurableObject } from 'cloudflare:workers';
 import { z } from 'zod';
 import migrations from '../../../../migrations/roomManager/migrations';
 import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
-import { TracksTable } from './schema';
+import { RoomVersionTable, TracksTable } from './schema';
 import { eq, ne } from 'drizzle-orm';
 import { WithEnv } from '../../hono';
+import { Server } from 'partyserver';
 
 const LocalTracksSchema = z.object({
 	mid: z.string(),
@@ -15,7 +15,8 @@ const LocalTracksSchema = z.object({
 
 export type Tracks = z.infer<typeof LocalTracksSchema>;
 
-export class RoomManager extends DurableObject<Env> {
+export class RoomManager extends Server<Env> {
+	static #KEY_NAME = 'room';
 	#db: DrizzleSqliteDODatabase;
 
 	constructor(ctx: DurableObjectState, env: Env) {
@@ -24,8 +25,13 @@ export class RoomManager extends DurableObject<Env> {
 		this.#db = drizzle(ctx.storage, { casing: 'snake_case' });
 	}
 
+	async onStart(): Promise<void> {
+		return this.migrate();
+	}
+
 	async migrate() {
-		return migrate(this.#db, migrations);
+		await migrate(this.#db, migrations);
+		this.#db.insert(RoomVersionTable).values({ key: RoomManager.#KEY_NAME, version: 1 }).onConflictDoNothing().run();
 	}
 
 	async addTracks(tracks: Array<Tracks>) {
@@ -37,20 +43,49 @@ export class RoomManager extends DurableObject<Env> {
 				})
 			)
 			.run();
+		const newVersion = this.#increaseVersion();
 
-		return { ok: true };
+		return { ok: true, version: newVersion };
 	}
 
 	async removeSession(sessionId: string) {
 		this.#db.delete(TracksTable).where(eq(TracksTable.sessionId, sessionId)).run();
+		const newVersion = this.#increaseVersion();
 
-		return { ok: true };
+		return { ok: true, version: newVersion };
 	}
 
 	async getAllLocalTracks({ exceptSessionId }: { exceptSessionId: string }) {
 		const result = this.#db.select().from(TracksTable).where(ne(TracksTable.sessionId, exceptSessionId)).all();
+		const version = this.#getVersion();
 
-		return result;
+		return { tracks: result, version: version };
+	}
+
+	#getVersion() {
+		const result = this.#db.select().from(RoomVersionTable).where(eq(RoomVersionTable.key, RoomManager.#KEY_NAME)).all();
+
+		if (result.length === 0) {
+			throw new Error(`Room version cannot be empty`);
+		}
+
+		return result[0].version;
+	}
+
+	#increaseVersion() {
+		const version = this.#getVersion();
+		const result = this.#db
+			.update(RoomVersionTable)
+			.set({ version: version + 1 })
+			.where(eq(RoomVersionTable.key, RoomManager.#KEY_NAME))
+			.returning()
+			.all();
+
+		if (result.length === 0) {
+			throw new Error(`Room version cannot be empty`);
+		}
+
+		return result[0].version;
 	}
 }
 

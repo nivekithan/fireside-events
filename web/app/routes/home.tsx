@@ -23,10 +23,10 @@ export default function Component({ loaderData }: Route.ComponentProps) {
   const [snapshot] = useMachine(broadcastMachine);
 
   if (snapshot.matches("determiningPermission")) {
-    return <Layout>{null}</Layout>;
+    return <Layout roomVersion={snapshot.context.roomVersion}>{null}</Layout>;
   } else if (snapshot.matches("permissionDenied")) {
     return (
-      <Layout>
+      <Layout roomVersion={snapshot.context.roomVersion}>
         <Notify
           title="Permission Denied"
           description="Enable Permission by going to site settings"
@@ -35,13 +35,13 @@ export default function Component({ loaderData }: Route.ComponentProps) {
     );
   } else if (snapshot.matches("permissionGranted")) {
     return (
-      <Layout>
+      <Layout roomVersion={snapshot.context.roomVersion}>
         <Spinner />
       </Layout>
     );
   } else if (snapshot.matches("permissionPending")) {
     return (
-      <Layout>
+      <Layout roomVersion={snapshot.context.roomVersion}>
         <Notify
           title="Permission Pending"
           description="Accept permission to share your webcam to continue using the site"
@@ -50,7 +50,7 @@ export default function Component({ loaderData }: Route.ComponentProps) {
     );
   } else if (snapshot.matches("unableToDeterminePermission")) {
     return (
-      <Layout>
+      <Layout roomVersion={snapshot.context.roomVersion}>
         <Notify
           title="Permission unable to determine"
           description="Try reloading the page or give permission manually by going to site settings"
@@ -59,7 +59,7 @@ export default function Component({ loaderData }: Route.ComponentProps) {
     );
   } else if (snapshot.matches("unableToGetMediaStream")) {
     return (
-      <Layout>
+      <Layout roomVersion={snapshot.context.roomVersion}>
         <Notify
           title="Error!"
           description="We are unable to load your webcam"
@@ -68,7 +68,7 @@ export default function Component({ loaderData }: Route.ComponentProps) {
     );
   } else if (snapshot.matches("broadcasting")) {
     return (
-      <Layout>
+      <Layout roomVersion={snapshot.context.roomVersion}>
         <Broadcasting snapshot={snapshot} />
       </Layout>
     );
@@ -147,10 +147,14 @@ function Notify({
   );
 }
 
-function Layout({ children }: React.PropsWithChildren<{}>) {
+function Layout({
+  children,
+  roomVersion,
+}: React.PropsWithChildren<{ roomVersion: number }>) {
   return (
     <div className="grid place-items-center min-h-screen relative">
       <TopLeftText text={getPublicId()} />
+      <TopRightText text={`${roomVersion}`} />
       {children}
     </div>
   );
@@ -159,5 +163,10 @@ function Layout({ children }: React.PropsWithChildren<{}>) {
 function TopLeftText({ text }: React.PropsWithoutRef<{ text: string }>) {
   return (
     <div className="absolute top-4 left-4 text-white font-medium">{text}</div>
+  );
+}
+function TopRightText({ text }: React.PropsWithoutRef<{ text: string }>) {
+  return (
+    <div className="absolute top-4 right-4 text-white font-medium">{text}</div>
   );
 }

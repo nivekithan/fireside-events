@@ -91,9 +91,7 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 				return c.json({ data: response.data, error: response.error });
 			}
 
-			const roomManagerId = c.env.RoomManager.idFromName(room);
-			const roomManager = c.env.RoomManager.get(roomManagerId);
-
+			const roomManager = await getRoomManager({ env: c.env, roomName: room });
 			await roomManager.addTracks(localTracksToBeAdded);
 
 			return c.json({ data: response.data, error: response.error });
@@ -179,11 +177,14 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 		const roomManager = await getRoomManager({ env: c.env, roomName: room });
 
 		const tracks = (await roomManager.getAllLocalTracks({ exceptSessionId: callsSessionId })) as {
-			mid: string;
-			sessionId: string;
-			id: number;
-			name: string;
-		}[];
+			tracks: {
+				mid: string;
+				sessionId: string;
+				id: number;
+				name: string;
+			}[];
+			version: number;
+		};
 
 		return c.json({ ok: true, data: tracks } as const);
 	});

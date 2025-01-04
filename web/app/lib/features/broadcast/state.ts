@@ -41,6 +41,7 @@ export const broadcastMachine = setup({
         mediaStream: MediaStream;
         trackMids: string[];
       }>;
+      roomVersion: number;
     },
     events: {} as BroadcastMachineEvents,
   },
@@ -48,7 +49,8 @@ export const broadcastMachine = setup({
     logUnhandledEvent: ({ event }) => {
       console.log(`Unhandled Event: `, event);
     },
-    setNewMediaStream: assign(
+
+    assignNewRemoteMediaStream: assign(
       (
         { context },
         mediaStream: { mediaStream: MediaStream; trackMids: string[] }
@@ -58,24 +60,21 @@ export const broadcastMachine = setup({
         };
       }
     ),
-    setOffer: assign(({ context }, offer: string) => {
-      return { internal: { ...context.internal, offer: offer } };
-    }),
-
-    setAnswer: assign(({ context }, answer: string) => {
-      return { internal: { ...context.internal, answer } };
-    }),
-
     assignRtcPeerConnection: assign(
       (_, rtcPeerConnection: RTCPeerConnection) => {
         return { rtcPeerConnection: rtcPeerConnection };
       }
     ),
+
     assignSessionIdentityToken: assign((_, sessionIdentityToken: string) => {
       return { sessionIdentityToken };
     }),
-    updateLocalMediaStream: assign((_, mediaStream: MediaStream) => {
+
+    assignLocalMediaStream: assign((_, mediaStream: MediaStream) => {
       return { localMediaStream: mediaStream };
+    }),
+    assignNewRoomVersion: assign((_, version: number) => {
+      return { roomVersion: version };
     }),
 
     spawnRemoteTracksListener: assign(
@@ -370,13 +369,15 @@ export const broadcastMachine = setup({
         });
 
         console.count("Sync With Room");
-        const { data: remoteTracks } = await res.json();
+        const {
+          data: { tracks: remoteTracks, version },
+        } = await res.json();
 
         console.log({ remoteTracks });
         console.count("Sync With Room");
         if (remoteTracks.length === 0) {
           // There are no remote tracks to sync with
-          return null;
+          return { version };
         }
 
         // TODO: Push only the remote tracks that are not already pushed
@@ -434,6 +435,8 @@ export const broadcastMachine = setup({
         console.count("Sync With Room");
 
         console.log(`Regneotiate Respone data`, regenotiateData);
+
+        return { version };
       }
     ),
   },
@@ -444,6 +447,7 @@ export const broadcastMachine = setup({
     localMediaStream: null,
     sessionIdentityToken: null,
     rtcPeerConnection: null,
+    roomVersion: -Infinity,
     internal: {
       answer: null,
       offer: null,
@@ -502,7 +506,7 @@ export const broadcastMachine = setup({
         src: "getMediaStream",
         onDone: {
           actions: {
-            type: "updateLocalMediaStream",
+            type: "assignLocalMediaStream",
             params({ event }) {
               return event.output;
             },
@@ -537,7 +541,7 @@ export const broadcastMachine = setup({
         onDone: {
           target: "broadcasting",
           actions: {
-            type: "updateLocalMediaStream",
+            type: "assignLocalMediaStream",
             params({ event }) {
               return event.output;
             },
@@ -561,7 +565,7 @@ export const broadcastMachine = setup({
         permissionPending: "permissionPending",
         newMediaStream: {
           actions: {
-            type: "setNewMediaStream",
+            type: "assignNewRemoteMediaStream",
             params({ event }) {
               return event.mediaStream;
             },
@@ -633,7 +637,17 @@ export const broadcastMachine = setup({
                 sessionIdentityToken: sessionIdentityToken,
               };
             },
-            onDone: "joinedRoom",
+            onDone: {
+              target: "joinedRoom",
+              actions: [
+                {
+                  type: "assignNewRoomVersion",
+                  params({ event }) {
+                    return event.output.version;
+                  },
+                },
+              ],
+            },
             onError: "unableToJoinRoom",
           },
         },

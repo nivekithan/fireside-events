@@ -12,3 +12,9 @@ export const TracksTable = sqliteTable(
 		return [uniqueIndex('uniqie_name').on(t.name)];
 	}
 );
+
+export const RoomVersionTable = sqliteTable('room_version', {
+	id: integer().notNull().primaryKey(),
+	key: text().notNull().unique(),
+	version: integer().notNull().default(1),
+});
