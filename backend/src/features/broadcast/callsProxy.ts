@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { createCallsSession, getCallsClient } from '../../externalServices/calls';
 import { createNewSessionIdentityToken, verifySessionIdentiyToken } from '../identity';
-import { Tracks } from './roomManager/roomManager';
+import { getRoomManager, Tracks } from './roomManager/roomManager';
 
 const SessionIdentitySchema = z.object({
 	'x-session-identity-token': z.string(),
@@ -32,11 +32,11 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 			'json',
 			z.union([
 				z.object({
-					sessionDesciption: z.object({ sdp: z.string(), type: z.literal('offer') }),
+					sessionDescription: z.object({ sdp: z.string(), type: z.literal('offer') }),
 					tracks: z.array(z.object({ location: z.literal('local'), mid: z.string(), trackName: z.string() })),
 				}),
 				z.object({
-					tracks: z.array(z.object({ localtion: z.literal('remote'), sessionId: z.string(), trackName: z.string() })),
+					tracks: z.array(z.object({ location: z.literal('remote'), sessionId: z.string(), trackName: z.string() })),
 				}),
 			])
 		),
@@ -70,19 +70,25 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 			const localTracksToBeAdded: Array<Tracks> = [];
 
 			for (const t of tracks) {
-				if (t.location !== 'local' || t.error) {
-					continue;
+				const isLocalTracksGotPushed = 'sessionDescription' in payload;
+
+				if (!isLocalTracksGotPushed) {
+					break;
 				}
 
 				const mid = t.mid;
 				const name = t.trackName;
-				const sessionId = t.sessionId;
 
-				if (!mid || !name || !sessionId) {
+				if (!mid || !name) {
 					throw new Error('Invalid track data');
 				}
 
-				localTracksToBeAdded.push({ mid, name, sessionId });
+				localTracksToBeAdded.push({ mid, name, sessionId: callsSessionId });
+			}
+
+			console.log({ countOfTracksToBeAdded: localTracksToBeAdded.length, tracks: tracks });
+			if (localTracksToBeAdded.length === 0) {
+				return c.json({ data: response.data, error: response.error });
 			}
 
 			const roomManagerId = c.env.RoomManager.idFromName(room);
@@ -165,15 +171,22 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 	.get('/local_tracks', zValidator('header', SessionIdentitySchema), async (c) => {
 		const sessionIdentityToken = c.req.valid('header')['x-session-identity-token'];
 
-		const { room } = await verifySessionIdentiyToken({
+		const { room, callsSessionId } = await verifySessionIdentiyToken({
 			jwtSecret: c.env.JWT_SECRET,
 			token: sessionIdentityToken,
 		});
 
-		const roomManagerId = c.env.RoomManager.idFromName(room);
-		const roomManager = c.env.RoomManager.get(roomManagerId);
+		const roomManager = await getRoomManager({ env: c.env, roomName: room });
 
-		const tracks = await roomManager.getAllLocalTracks();
+		const tracks = (await roomManager.getAllLocalTracks({ exceptSessionId: callsSessionId })) as {
+			mid: string;
+			sessionId: string;
+			id: number;
+			name: string;
+		}[];
 
-		return c.json({ tracks });
+		return c.json({ ok: true, data: tracks } as const);
 	});
+type B<T> = {
+	[K in keyof T as T[K] extends Disposable[keyof Disposable] ? never : K]: T[K];
+};

@@ -92,13 +92,14 @@ function Broadcasting({
         remoteMediaStreams,
         mediaStream,
         transceivers,
+        snapshot,
       });
     }, 5_000);
 
     return () => {
       clearInterval(interval);
     };
-  }, [mediaStream, remoteMediaStreams, rtcConnection]);
+  }, [mediaStream, remoteMediaStreams, rtcConnection, snapshot]);
 
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 

@@ -1,10 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
 import { z } from 'zod';
-import migrations from '../../../../migrations/callsSessionManager/migrations';
+import migrations from '../../../../migrations/roomManager/migrations';
 import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import { TracksTable } from './schema';
-import { eq } from 'drizzle-orm';
+import { eq, ne } from 'drizzle-orm';
+import { WithEnv } from '../../hono';
 
 const LocalTracksSchema = z.object({
 	mid: z.string(),
@@ -20,7 +21,7 @@ export class RoomManager extends DurableObject<Env> {
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
 
-		this.#db = drizzle(ctx.storage);
+		this.#db = drizzle(ctx.storage, { casing: 'snake_case' });
 	}
 
 	async migrate() {
@@ -46,9 +47,18 @@ export class RoomManager extends DurableObject<Env> {
 		return { ok: true };
 	}
 
-	async getAllLocalTracks() {
-		const result = this.#db.select().from(TracksTable).all();
+	async getAllLocalTracks({ exceptSessionId }: { exceptSessionId: string }) {
+		const result = this.#db.select().from(TracksTable).where(ne(TracksTable.sessionId, exceptSessionId)).all();
 
-		return Object.groupBy(result, (t) => t.sessionId);
+		return result;
 	}
+}
+
+export async function getRoomManager({ env, roomName }: WithEnv<{ roomName: string }>) {
+	const roomManagerId = env.RoomManager.idFromName(roomName);
+	const roomManager = env.RoomManager.get(roomManagerId);
+
+	await roomManager.migrate();
+
+	return roomManager;
 }

@@ -1,8 +1,8 @@
 import { AnyActorRef, assign, fromPromise, setup, spawnChild } from "xstate";
-import { SignalingServer } from "./signalingServer";
 import { getPublicId } from "../identity";
 import invariant from "tiny-invariant";
 import { bk } from "../bk";
+import { pushRemoteTracks } from "./calls";
 
 export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
@@ -31,7 +31,6 @@ export const broadcastMachine = setup({
   types: {
     context: {} as {
       localMediaStream: null | MediaStream;
-      signalingServer: SignalingServer | null;
       rtcPeerConnection: null | RTCPeerConnection;
       sessionIdentityToken: string | null;
       internal: {
@@ -79,36 +78,6 @@ export const broadcastMachine = setup({
       return { localMediaStream: mediaStream };
     }),
 
-    listenToSignalingServer: assign(({ self }) => {
-      const signalingServer = new SignalingServer({
-        room: SignalingServer.DEFAULT_ROOM,
-        id: getPublicId(),
-        parentMachine: self,
-      });
-
-      signalingServer.listen();
-
-      return { signalingServer };
-    }),
-    stopSignalingServer: assign(({ context }) => {
-      if (!context.signalingServer) {
-        throw new Error(
-          `Calling stopSignalingServer without ever initalizing signaling server`
-        );
-      }
-
-      context.signalingServer.stop();
-
-      return { signalingServer: null };
-    }),
-
-    sendAnswer: ({ context }, answer: string) => {
-      const signalingServer = context.signalingServer;
-
-      invariant(signalingServer, `Expected signaling server to be initalized`);
-
-      signalingServer.regenotiate(answer);
-    },
     spawnRemoteTracksListener: assign(
       ({ spawn, self, context }, rtcConnection: RTCPeerConnection) => {
         spawn("listenForNewRemoteTracks", {
@@ -301,16 +270,21 @@ export const broadcastMachine = setup({
 
     broadcastLocalMediaStream: fromPromise(
       async ({ input }: { input: { mediaStream: MediaStream } }) => {
+        console.log(`Broadcasting local media stream`);
+        console.count("BroadcastLocalMediaStream");
         const sessionIdentityTokenRes = await bk.calls.sessions.new.$post({
           json: {
             userSessionId: getPublicId(),
-            room: SignalingServer.DEFAULT_ROOM,
+            room: "DEFAULT",
           },
         });
+
+        console.count("BroadcastLocalMediaStream");
 
         const sessionIdentityToken = (await sessionIdentityTokenRes.json()).data
           .sessionIdentityToken;
 
+        console.count("BroadcastLocalMediaStream");
         const localMediaStream = input.mediaStream;
 
         const rtcConnection = new RTCPeerConnection({
@@ -325,7 +299,12 @@ export const broadcastMachine = setup({
         const transrecivers = localMediaStream.getTracks().map((t) => {
           return rtcConnection.addTransceiver(t, { direction: "sendonly" });
         });
+        const localOffer = await rtcConnection.createOffer();
 
+        console.count("BroadcastLocalMediaStream");
+        await rtcConnection.setLocalDescription(localOffer);
+
+        console.count("BroadcastLocalMediaStream");
         const tracks = transrecivers.map((t) => {
           const mid = t.mid;
           const trackName = t.sender.track?.id;
@@ -337,29 +316,29 @@ export const broadcastMachine = setup({
           return { location: "local", mid, trackName } as const;
         });
 
-        const localOffer = await rtcConnection.createOffer();
         const sdp = localOffer.sdp;
 
         if (!sdp) {
           throw new Error(`Expected sdp to be generated`);
         }
 
-        await rtcConnection.setLocalDescription(localOffer);
-
         const pushLocalTracksRes = await bk.calls.tracks.new.$post({
           header: { "x-session-identity-token": sessionIdentityToken },
           json: {
-            sessionDesciption: { type: "offer", sdp: sdp },
+            sessionDescription: { type: "offer", sdp: sdp },
             tracks: tracks,
           },
         });
+        console.count("BroadcastLocalMediaStream");
 
         const pushLocalTracksData = await pushLocalTracksRes.json();
 
+        console.count("BroadcastLocalMediaStream");
         if (!pushLocalTracksData.data) {
           throw new Error(`Expected data to be returned from pushLocalTracks`);
         }
 
+        console.log(pushLocalTracksData);
         const answerSdp = pushLocalTracksData.data.sessionDescription?.sdp;
 
         if (!answerSdp) {
@@ -370,8 +349,91 @@ export const broadcastMachine = setup({
           type: "answer",
           sdp: answerSdp,
         });
+        console.count("BroadcastLocalMediaStream");
 
         return { sessionIdentityToken, rtcConnection, transrecivers };
+      }
+    ),
+
+    syncWithRoom: fromPromise(
+      async ({
+        input: { sessionIdentityToken, rtcPeerConnection },
+      }: {
+        input: {
+          sessionIdentityToken: string;
+          rtcPeerConnection: RTCPeerConnection;
+        };
+      }) => {
+        console.count("Sync With Room");
+        const res = await bk.calls.local_tracks.$get({
+          header: { "x-session-identity-token": sessionIdentityToken },
+        });
+
+        console.count("Sync With Room");
+        const { data: remoteTracks } = await res.json();
+
+        console.log({ remoteTracks });
+        console.count("Sync With Room");
+        if (remoteTracks.length === 0) {
+          // There are no remote tracks to sync with
+          return null;
+        }
+
+        // TODO: Push only the remote tracks that are not already pushed
+        const pushRemoteTracksRes = await pushRemoteTracks({
+          sessionIdentityToken,
+          tracks: remoteTracks.map((t) => ({
+            name: t.name,
+            remoteSessionId: t.sessionId,
+          })),
+        });
+        console.count("Sync With Room");
+
+        // If pushing some tracks failed. Log them as warning
+        // TODO: Handle this better
+
+        pushRemoteTracksRes?.tracks?.forEach((t) => {
+          if (t.error) {
+            console.warn(
+              `Pushing track: ${t.trackName} of remoteSession: ${t.sessionId} failed due to ${t.error.errorCode}: ${t.error.errorDescription}`
+            );
+          }
+        });
+
+        const offerFromCalls = pushRemoteTracksRes?.sessionDescription;
+
+        if (!offerFromCalls) {
+          throw new Error(`Expected offer to be returned from calls`);
+        }
+
+        const { sdp, type } = offerFromCalls;
+
+        if (!sdp || !type) {
+          throw new Error(`Expected sdp and type to be returned from calls`);
+        }
+
+        await rtcPeerConnection.setRemoteDescription({ sdp, type });
+
+        console.count("Sync With Room");
+        const answer = await rtcPeerConnection.createAnswer();
+
+        await rtcPeerConnection.setLocalDescription(answer);
+
+        console.count("Sync With Room");
+        if (!answer.sdp || answer.type !== "answer") {
+          throw new Error(`[UNREACHABLE] Expected answer to be generated`);
+        }
+
+        const regenotiateRes = await bk.calls.sessions.renegotiate.$put({
+          header: { "x-session-identity-token": sessionIdentityToken },
+          json: { sessionDescription: { sdp: answer.sdp, type: answer.type } },
+        });
+        console.count("Sync With Room");
+
+        const regenotiateData = await regenotiateRes.json();
+        console.count("Sync With Room");
+
+        console.log(`Regneotiate Respone data`, regenotiateData);
       }
     ),
   },
@@ -380,7 +442,6 @@ export const broadcastMachine = setup({
   initial: "determiningPermission",
   context: {
     localMediaStream: null,
-    signalingServer: null,
     sessionIdentityToken: null,
     rtcPeerConnection: null,
     internal: {
@@ -495,8 +556,6 @@ export const broadcastMachine = setup({
       },
     },
     broadcasting: {
-      entry: ["listenToSignalingServer"],
-      exit: ["stopSignalingServer"],
       on: {
         permissionDenied: "permissionDenied",
         permissionPending: "permissionPending",
@@ -543,125 +602,42 @@ export const broadcastMachine = setup({
                   },
                 },
               ],
-              target: "waitingForReply",
+              target: "syncWithRoom",
             },
             onError: {
               target: "unableToJoinRoom",
+              actions: ({ event }) => {
+                console.log(`Error while joining room`, event.error);
+              },
             },
           },
         },
         unableToJoinRoom: {},
-
-        waitingForReply: {
-          on: {
-            rtcAnswer: {
-              actions: {
-                type: "setAnswer",
-                params({ event }) {
-                  return event.sdp;
-                },
-              },
-              target: "processingAnswer",
-            },
-            rtcOffer: {
-              actions: {
-                type: "setOffer",
-                params({ event }) {
-                  return event.sdp;
-                },
-              },
-              target: "processingOffer",
-            },
-          },
-        },
-        processingOffer: {
+        syncWithRoom: {
           invoke: {
-            src: "setOfferToRTCPeerConnection",
-            input({ context }) {
+            src: "syncWithRoom",
+            input: ({ context }) => {
               const rtcPeerConnection = context.rtcPeerConnection;
-              const offer = context.internal.offer;
+              const sessionIdentityToken = context.sessionIdentityToken;
 
               invariant(
                 rtcPeerConnection,
-                `Expected RTCPeerConnection to be initalized`
-              );
-              invariant(offer, `Expected offer to be initialized`);
-
-              return { offer, rtcPeerConnection };
-            },
-            onDone: {
-              actions: {
-                type: "sendAnswer",
-                params({ event }) {
-                  return event.output.newAnswer.sdp;
-                },
-              },
-              target: "broadcastingLocalStream",
-            },
-            onError: {
-              target: "unableToProcessOffer",
-            },
-          },
-        },
-        processingAnswer: {
-          on: {
-            rtcOffer: {
-              actions: {
-                type: "setOffer",
-                params({ event }) {
-                  return event.sdp;
-                },
-              },
-              target: "processingOffer",
-            },
-          },
-          invoke: {
-            src: "setAnswerToRTCPeerConnection",
-            input({ context }) {
-              invariant(
-                context.rtcPeerConnection,
-                "Expected RTCPeerConnection to be initialised"
+                `Expected RTCPeerConnection to be initialized`
               );
               invariant(
-                context.internal.answer,
-                "Expected internal.answer to be set"
+                sessionIdentityToken,
+                `Expected sessionIdentityToken to be initialized`
               );
               return {
-                rtcPeerConnection: context.rtcPeerConnection,
-                answer: context.internal.answer,
+                rtcPeerConnection: rtcPeerConnection,
+                sessionIdentityToken: sessionIdentityToken,
               };
             },
-            onDone: {
-              target: "broadcastingLocalStream",
-            },
-            onError: {
-              target: "unableToProcessAnswer",
-            },
+            onDone: "joinedRoom",
+            onError: "unableToJoinRoom",
           },
         },
-        broadcastingLocalStream: {
-          on: {
-            rtcOffer: {
-              actions: {
-                type: "setOffer",
-                params({ event }) {
-                  return event.sdp;
-                },
-              },
-              target: "processingOffer",
-            },
-            removeTrack: {
-              actions: {
-                type: "stopTransrecvicer",
-                params({ context, event }) {
-                  return event.mId;
-                },
-              },
-            },
-          },
-        },
-        unableToProcessAnswer: {},
-        unableToProcessOffer: {},
+        joinedRoom: {},
       },
     },
   },
