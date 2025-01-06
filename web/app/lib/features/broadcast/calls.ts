@@ -24,9 +24,3 @@ export async function pushRemoteTracks({
 
   return data;
 }
-
-export async function getAllRemoteTracksInRoom({
-  sessionIdentityToken,
-}: {
-  sessionIdentityToken: string;
-}) {}

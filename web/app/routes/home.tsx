@@ -18,8 +18,7 @@ export function clientLoader({}: Route.ClientLoaderArgs) {
   return { publicId };
 }
 
-export default function Component({ loaderData }: Route.ComponentProps) {
-  const { publicId } = loaderData;
+export default function Component({}: Route.ComponentProps) {
   const [snapshot] = useMachine(broadcastMachine);
 
   if (snapshot.matches("determiningPermission")) {
@@ -83,8 +82,15 @@ function Broadcasting({
   const mediaStream = snapshot.context.localMediaStream;
   const remoteMediaStreams = snapshot.context.remoteMediaStreams;
   const rtcConnection = snapshot.context.rtcPeerConnection;
+  const signaling = snapshot.context.signaling;
 
   useEffect(() => {
+    console.log({
+      rtcConnection,
+      remoteMediaStreams,
+      mediaStream,
+      snapshot,
+    });
     const interval = setInterval(() => {
       const transceivers = rtcConnection?.getTransceivers();
       console.log({
@@ -93,13 +99,15 @@ function Broadcasting({
         mediaStream,
         transceivers,
         snapshot,
+        signalingVersion: signaling?.version,
+        signalingSyncedTracks: signaling?.syncedTracks,
       });
     }, 5_000);
 
     return () => {
       clearInterval(interval);
     };
-  }, [mediaStream, remoteMediaStreams, rtcConnection, snapshot]);
+  }, [mediaStream, remoteMediaStreams, rtcConnection, snapshot, signaling]);
 
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 

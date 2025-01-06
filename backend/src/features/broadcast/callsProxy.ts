@@ -61,10 +61,12 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 				body: payload,
 			});
 
+			console.log(`[CallsProxyRouter] POST /tracks/new response: ${JSON.stringify(response)}`);
+
 			const tracks = response.data?.tracks;
 
 			if (!tracks) {
-				return c.json({ data: response.data, error: response.error });
+				return c.json({ data: response.data });
 			}
 
 			const localTracksToBeAdded: Array<Tracks> = [];
@@ -86,15 +88,15 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 				localTracksToBeAdded.push({ mid, name, sessionId: callsSessionId });
 			}
 
-			console.log({ countOfTracksToBeAdded: localTracksToBeAdded.length, tracks: tracks });
+			// console.log({ countOfTracksToBeAdded: localTracksToBeAdded.length, tracks: tracks, responseFromCalls: response.data });
 			if (localTracksToBeAdded.length === 0) {
-				return c.json({ data: response.data, error: response.error });
+				return c.json({ data: response.data });
 			}
 
 			const roomManager = await getRoomManager({ env: c.env, roomName: room });
 			await roomManager.addTracks(localTracksToBeAdded);
 
-			return c.json({ data: response.data, error: response.error });
+			return c.json({ data: response.data });
 		}
 	)
 	.put(

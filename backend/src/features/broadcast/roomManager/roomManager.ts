@@ -6,6 +6,7 @@ import { RoomVersionTable, TracksTable } from './schema';
 import { eq, ne } from 'drizzle-orm';
 import { WithEnv } from '../../hono';
 import { Server } from 'partyserver';
+import { ServerSentMessages } from 'signaling-messages';
 
 const LocalTracksSchema = z.object({
 	mid: z.string(),
@@ -44,6 +45,7 @@ export class RoomManager extends Server<Env> {
 			)
 			.run();
 		const newVersion = this.#increaseVersion();
+		this.#poke();
 
 		return { ok: true, version: newVersion };
 	}
@@ -86,6 +88,14 @@ export class RoomManager extends Server<Env> {
 		}
 
 		return result[0].version;
+	}
+
+	#poke() {
+		this.#broadcastMessageToClient({ type: 'poke', version: this.#getVersion() });
+	}
+
+	#broadcastMessageToClient(message: ServerSentMessages) {
+		this.broadcast(JSON.stringify(message));
 	}
 }
 

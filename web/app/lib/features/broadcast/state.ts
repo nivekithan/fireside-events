@@ -3,18 +3,19 @@ import { getPublicId } from "../identity";
 import invariant from "tiny-invariant";
 import { bk } from "../bk";
 import { pushRemoteTracks } from "./calls";
+import { Signaling } from "./signaling";
 
 export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
   | { type: "permissionDenied" }
   | { type: "permissionPending" }
-  | { type: "rtcAnswer"; sdp: string }
-  | { type: "rtcOffer"; sdp: string }
   | {
       type: "newMediaStream";
       mediaStream: { mediaStream: MediaStream; trackMids: string[] };
     }
-  | { type: "removeTrack"; mId: string };
+  | {
+      type: "poke";
+    };
 
 export const broadcastMachine = setup({
   guards: {
@@ -27,12 +28,20 @@ export const broadcastMachine = setup({
     isPermissionPending: (_, state: PermissionState) => {
       return state === "prompt";
     },
+    isRoomInSync: ({ context }) => {
+      const signaling = context.signaling;
+
+      invariant(signaling, `Expected signaling to be initialized`);
+
+      return context.roomVersion === signaling.version;
+    },
   },
   types: {
     context: {} as {
       localMediaStream: null | MediaStream;
       rtcPeerConnection: null | RTCPeerConnection;
       sessionIdentityToken: string | null;
+      signaling: Signaling | null;
       internal: {
         answer: string | null;
         offer: string | null;
@@ -46,6 +55,45 @@ export const broadcastMachine = setup({
     events: {} as BroadcastMachineEvents,
   },
   actions: {
+    spawnSignalingListener: assign(({ self, context }) => {
+      const previousSignaling = context.signaling;
+
+      if (previousSignaling) {
+        console.warn(`Signaling listener already exists. Skipping`);
+        return { ...context };
+      }
+
+      const room = Signaling.DEFAULT_ROOM;
+      const signalingListener = new Signaling({ room, machineRef: self });
+
+      return { signaling: signalingListener };
+    }),
+
+    connectToSignalingServer: ({ context }) => {
+      const signaling = context.signaling;
+      const sessionIdentityToken = context.sessionIdentityToken;
+
+      invariant(signaling, `Expected signaling to be initialized`);
+      invariant(
+        sessionIdentityToken,
+        `Expected sessionIdentityToken to be initialized`
+      );
+
+      signaling.connect(sessionIdentityToken);
+    },
+
+    stopSignalingListener: assign(({ context }) => {
+      const signaling = context.signaling;
+
+      if (!signaling) {
+        return { ...context };
+      }
+
+      signaling.disconnect();
+
+      return { signaling: null };
+    }),
+
     logUnhandledEvent: ({ event }) => {
       console.log(`Unhandled Event: `, event);
     },
@@ -269,8 +317,6 @@ export const broadcastMachine = setup({
 
     broadcastLocalMediaStream: fromPromise(
       async ({ input }: { input: { mediaStream: MediaStream } }) => {
-        console.log(`Broadcasting local media stream`);
-        console.count("BroadcastLocalMediaStream");
         const sessionIdentityTokenRes = await bk.calls.sessions.new.$post({
           json: {
             userSessionId: getPublicId(),
@@ -278,12 +324,9 @@ export const broadcastMachine = setup({
           },
         });
 
-        console.count("BroadcastLocalMediaStream");
-
         const sessionIdentityToken = (await sessionIdentityTokenRes.json()).data
           .sessionIdentityToken;
 
-        console.count("BroadcastLocalMediaStream");
         const localMediaStream = input.mediaStream;
 
         const rtcConnection = new RTCPeerConnection({
@@ -300,10 +343,8 @@ export const broadcastMachine = setup({
         });
         const localOffer = await rtcConnection.createOffer();
 
-        console.count("BroadcastLocalMediaStream");
         await rtcConnection.setLocalDescription(localOffer);
 
-        console.count("BroadcastLocalMediaStream");
         const tracks = transrecivers.map((t) => {
           const mid = t.mid;
           const trackName = t.sender.track?.id;
@@ -328,16 +369,13 @@ export const broadcastMachine = setup({
             tracks: tracks,
           },
         });
-        console.count("BroadcastLocalMediaStream");
 
         const pushLocalTracksData = await pushLocalTracksRes.json();
 
-        console.count("BroadcastLocalMediaStream");
         if (!pushLocalTracksData.data) {
           throw new Error(`Expected data to be returned from pushLocalTracks`);
         }
 
-        console.log(pushLocalTracksData);
         const answerSdp = pushLocalTracksData.data.sessionDescription?.sdp;
 
         if (!answerSdp) {
@@ -348,7 +386,6 @@ export const broadcastMachine = setup({
           type: "answer",
           sdp: answerSdp,
         });
-        console.count("BroadcastLocalMediaStream");
 
         return { sessionIdentityToken, rtcConnection, transrecivers };
       }
@@ -356,85 +393,92 @@ export const broadcastMachine = setup({
 
     syncWithRoom: fromPromise(
       async ({
-        input: { sessionIdentityToken, rtcPeerConnection },
+        input: { sessionIdentityToken, rtcPeerConnection, signlaing },
       }: {
         input: {
           sessionIdentityToken: string;
           rtcPeerConnection: RTCPeerConnection;
+          signlaing: Signaling;
         };
       }) => {
-        console.count("Sync With Room");
         const res = await bk.calls.local_tracks.$get({
           header: { "x-session-identity-token": sessionIdentityToken },
         });
 
-        console.count("Sync With Room");
         const {
           data: { tracks: remoteTracks, version },
         } = await res.json();
 
-        console.log({ remoteTracks });
-        console.count("Sync With Room");
         if (remoteTracks.length === 0) {
           // There are no remote tracks to sync with
           return { version };
         }
 
-        // TODO: Push only the remote tracks that are not already pushed
-        const pushRemoteTracksRes = await pushRemoteTracks({
-          sessionIdentityToken,
-          tracks: remoteTracks.map((t) => ({
-            name: t.name,
-            remoteSessionId: t.sessionId,
-          })),
-        });
-        console.count("Sync With Room");
+        const { toAdd, toRemove } = signlaing.findDiff({ final: remoteTracks });
 
-        // If pushing some tracks failed. Log them as warning
-        // TODO: Handle this better
+        if (toAdd.length !== 0) {
+          const pushRemoteTracksRes = await pushRemoteTracks({
+            sessionIdentityToken,
+            tracks: toAdd.map((t) => ({
+              name: t.name,
+              remoteSessionId: t.sessionId,
+            })),
+          });
+          signlaing.syncedTracks.push(...toAdd);
 
-        pushRemoteTracksRes?.tracks?.forEach((t) => {
-          if (t.error) {
-            console.warn(
-              `Pushing track: ${t.trackName} of remoteSession: ${t.sessionId} failed due to ${t.error.errorCode}: ${t.error.errorDescription}`
+          // TODO: Handle toRemove
+
+          // If pushing some tracks failed. Log them as warning
+          // TODO: Handle this better
+
+          pushRemoteTracksRes?.tracks?.forEach((t) => {
+            if (t.error) {
+              console.warn(
+                `Pushing track: ${t.trackName} of remoteSession: ${t.sessionId} failed due to ${t.error.errorCode}: ${t.error.errorDescription}`
+              );
+            }
+          });
+
+          const offerFromCalls = pushRemoteTracksRes?.sessionDescription;
+
+          if (!offerFromCalls) {
+            throw new Error(
+              `Expected offer to be returned from calls: ${JSON.stringify(
+                pushRemoteTracksRes
+              )}`
             );
           }
-        });
 
-        const offerFromCalls = pushRemoteTracksRes?.sessionDescription;
+          const { sdp, type } = offerFromCalls;
 
-        if (!offerFromCalls) {
-          throw new Error(`Expected offer to be returned from calls`);
+          if (!sdp || !type) {
+            throw new Error(`Expected sdp and type to be returned from calls`);
+          }
+
+          await rtcPeerConnection.setRemoteDescription({ sdp, type });
+
+          console.count("Sync With Room");
+          const answer = await rtcPeerConnection.createAnswer();
+
+          await rtcPeerConnection.setLocalDescription(answer);
+
+          if (!answer.sdp || answer.type !== "answer") {
+            throw new Error(`[UNREACHABLE] Expected answer to be generated`);
+          }
+
+          const regenotiateRes = await bk.calls.sessions.renegotiate.$put({
+            header: { "x-session-identity-token": sessionIdentityToken },
+            json: {
+              sessionDescription: { sdp: answer.sdp, type: answer.type },
+            },
+          });
+
+          const regenotiateData = await regenotiateRes.json();
+
+          console.log(`Regneotiate Respone data`, regenotiateData);
+
+          return { version };
         }
-
-        const { sdp, type } = offerFromCalls;
-
-        if (!sdp || !type) {
-          throw new Error(`Expected sdp and type to be returned from calls`);
-        }
-
-        await rtcPeerConnection.setRemoteDescription({ sdp, type });
-
-        console.count("Sync With Room");
-        const answer = await rtcPeerConnection.createAnswer();
-
-        await rtcPeerConnection.setLocalDescription(answer);
-
-        console.count("Sync With Room");
-        if (!answer.sdp || answer.type !== "answer") {
-          throw new Error(`[UNREACHABLE] Expected answer to be generated`);
-        }
-
-        const regenotiateRes = await bk.calls.sessions.renegotiate.$put({
-          header: { "x-session-identity-token": sessionIdentityToken },
-          json: { sessionDescription: { sdp: answer.sdp, type: answer.type } },
-        });
-        console.count("Sync With Room");
-
-        const regenotiateData = await regenotiateRes.json();
-        console.count("Sync With Room");
-
-        console.log(`Regneotiate Respone data`, regenotiateData);
 
         return { version };
       }
@@ -444,6 +488,7 @@ export const broadcastMachine = setup({
   id: "broadcast",
   initial: "determiningPermission",
   context: {
+    signaling: null,
     localMediaStream: null,
     sessionIdentityToken: null,
     rtcPeerConnection: null,
@@ -560,9 +605,12 @@ export const broadcastMachine = setup({
       },
     },
     broadcasting: {
+      entry: [{ type: "spawnSignalingListener" }],
+      exit: [{ type: "stopSignalingListener" }],
       on: {
         permissionDenied: "permissionDenied",
         permissionPending: "permissionPending",
+
         newMediaStream: {
           actions: {
             type: "assignNewRemoteMediaStream",
@@ -600,6 +648,9 @@ export const broadcastMachine = setup({
                   },
                 },
                 {
+                  type: "connectToSignalingServer",
+                },
+                {
                   type: "spawnRemoteTracksListener",
                   params({ event }) {
                     return event.output.rtcConnection;
@@ -623,6 +674,7 @@ export const broadcastMachine = setup({
             input: ({ context }) => {
               const rtcPeerConnection = context.rtcPeerConnection;
               const sessionIdentityToken = context.sessionIdentityToken;
+              const signaling = context.signaling;
 
               invariant(
                 rtcPeerConnection,
@@ -632,26 +684,62 @@ export const broadcastMachine = setup({
                 sessionIdentityToken,
                 `Expected sessionIdentityToken to be initialized`
               );
+              invariant(signaling, `Expected signaling to be initialized`);
               return {
                 rtcPeerConnection: rtcPeerConnection,
                 sessionIdentityToken: sessionIdentityToken,
+                signlaing: signaling,
               };
             },
-            onDone: {
-              target: "joinedRoom",
-              actions: [
-                {
-                  type: "assignNewRoomVersion",
-                  params({ event }) {
-                    return event.output.version;
-                  },
+            onDone: [
+              {
+                guard: {
+                  type: "isRoomInSync",
                 },
-              ],
+                target: "joinedRoom",
+                actions: [
+                  {
+                    type: "assignNewRoomVersion",
+                    params({ event }) {
+                      return event.output.version;
+                    },
+                  },
+                ],
+              },
+              {
+                target: "syncWithRoom",
+                reenter: true,
+                actions: [
+                  {
+                    type: "assignNewRoomVersion",
+                    params({ event }) {
+                      return event.output.version;
+                    },
+                  },
+                ],
+              },
+            ],
+            onError: {
+              target: "unableToJoinRoom",
+              actions: ({ event }) => {
+                console.warn(`Error while sync with room`, event.error);
+              },
             },
-            onError: "unableToJoinRoom",
           },
         },
-        joinedRoom: {},
+        joinedRoom: {
+          on: {
+            poke: [
+              {
+                guard: "isRoomInSync",
+                target: "joinedRoom",
+              },
+              {
+                target: "syncWithRoom",
+              },
+            ],
+          },
+        },
       },
     },
   },

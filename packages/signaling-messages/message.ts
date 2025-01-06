@@ -1,42 +1,23 @@
-import { z } from "zod";
+import { number, z } from "zod";
+import { err, ok } from "neverthrow";
 
-export const LocalTracksSchema = z.object({
-  mId: z.string(),
-  name: z.string(),
+export const PokeMessage = z.object({
+  type: z.literal("poke"),
+  version: z.number(),
 });
 
-export const PushTrackMessage = z.object({
-  sdp: z.string(),
-  tracks: z.array(LocalTracksSchema),
-  type: z.literal("pushTrack"),
-});
-
-export const RtcAnswer = z.object({
-  type: z.literal("rtcAnswer"),
-  sdp: z.string(),
-});
-
-export const ClientSentMessages = z.discriminatedUnion("type", [
-  PushTrackMessage,
-  RtcAnswer,
-]);
-
-export type ClientSentMessage = z.infer<typeof ClientSentMessages>;
-
-export const RtcOffer = z.object({
-  type: z.literal("rtcOffer"),
-  sdp: z.string(),
-});
-
-export const RemoveTrackMessage = z.object({
-  type: z.literal("removeTrack"),
-  mId: z.string(),
-});
-
-export const ServerSentMessages = z.discriminatedUnion("type", [
-  RtcAnswer,
-  RtcOffer,
-  RemoveTrackMessage,
-]);
+export const ServerSentMessages = z.discriminatedUnion("type", [PokeMessage]);
 
 export type ServerSentMessages = z.infer<typeof ServerSentMessages>;
+
+export function parseServerSentMessages(data: unknown) {
+  const result = ServerSentMessages.safeParse(data);
+
+  if (!result.success) {
+    return err({
+      message: result.error.flatten(),
+    });
+  }
+
+  return ok({ data: result.data });
+}
