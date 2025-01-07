@@ -4,7 +4,7 @@ import { parseServerSentMessages } from "signaling-messages";
 import { AnyActorRef } from "xstate";
 import { BroadcastMachineEvents } from "./state";
 
-export type SignalingTracks = { name: string; sessionId: string };
+export type SignalingTracks = { name: string; sessionId: string; mid: string };
 
 export class Signaling {
   static DEFAULT_ROOM = "DEFAULT";
@@ -14,7 +14,7 @@ export class Signaling {
   #machineRef: AnyActorRef;
 
   version = -Infinity;
-  syncedTracks: Array<{ sessionId: string; name: string }> = [];
+  syncedTracks: Array<SignalingTracks> = [];
 
   constructor({ room, machineRef }: { room: string; machineRef: AnyActorRef }) {
     this.#room = room;
@@ -65,7 +65,7 @@ export class Signaling {
     this.#partySocket = partySocket;
   }
 
-  findDiff({ final }: { final: Array<SignalingTracks> }) {
+  findDiff({ final }: { final: Array<Omit<SignalingTracks, "mid">> }) {
     const current = this.syncedTracks;
     // Create sets of names for efficient lookup
     const finalNames = new Set(final.map((item) => item.name));

@@ -85,7 +85,7 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 					throw new Error('Invalid track data');
 				}
 
-				localTracksToBeAdded.push({ mid, name, sessionId: callsSessionId });
+				localTracksToBeAdded.push({ name, sessionId: callsSessionId });
 			}
 
 			// console.log({ countOfTracksToBeAdded: localTracksToBeAdded.length, tracks: tracks, responseFromCalls: response.data });
@@ -162,10 +162,11 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 						sessionId: callsSessionId,
 					},
 				},
-				body: payload,
+				body: { tracks: payload.tracks, sessionDescription: payload.sessionDescription, force: false },
 			});
 
-			return c.json({ data: response.data, error: response.error });
+			console.log(`Close tracks response: ${JSON.stringify(response, null, 2)}`);
+			return c.json({ data: response.data, error: response.error as { errorCode: string; errorDescription: string } | undefined });
 		}
 	)
 	.get('/local_tracks', zValidator('header', SessionIdentitySchema), async (c) => {
@@ -180,7 +181,6 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 
 		const tracks = (await roomManager.getAllLocalTracks({ exceptSessionId: callsSessionId })) as {
 			tracks: {
-				mid: string;
 				sessionId: string;
 				id: number;
 				name: string;

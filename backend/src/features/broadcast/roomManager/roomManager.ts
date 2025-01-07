@@ -5,11 +5,11 @@ import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import { RoomVersionTable, TracksTable } from './schema';
 import { eq, ne } from 'drizzle-orm';
 import { WithEnv } from '../../hono';
-import { Server } from 'partyserver';
+import { Connection, Server } from 'partyserver';
 import { ServerSentMessages } from 'signaling-messages';
+import { verifySessionIdentiyToken } from '../../identity';
 
 const LocalTracksSchema = z.object({
-	mid: z.string(),
 	name: z.string(),
 	sessionId: z.string(),
 });
@@ -26,6 +26,12 @@ export class RoomManager extends Server<Env> {
 		this.#db = drizzle(ctx.storage, { casing: 'snake_case' });
 	}
 
+	async onClose(connection: Connection): Promise<void> {
+		const sessionIdentityToken = connection.id;
+		const { callsSessionId } = await verifySessionIdentiyToken({ jwtSecret: this.env.JWT_SECRET, token: sessionIdentityToken });
+		this.removeSession(callsSessionId);
+	}
+
 	async onStart(): Promise<void> {
 		return this.migrate();
 	}
@@ -40,7 +46,7 @@ export class RoomManager extends Server<Env> {
 			.insert(TracksTable)
 			.values(
 				tracks.map((t) => {
-					return { mid: t.mid, name: t.name, sessionId: t.sessionId };
+					return { name: t.name, sessionId: t.sessionId };
 				})
 			)
 			.run();
@@ -53,6 +59,7 @@ export class RoomManager extends Server<Env> {
 	async removeSession(sessionId: string) {
 		this.#db.delete(TracksTable).where(eq(TracksTable.sessionId, sessionId)).run();
 		const newVersion = this.#increaseVersion();
+		this.#poke();
 
 		return { ok: true, version: newVersion };
 	}

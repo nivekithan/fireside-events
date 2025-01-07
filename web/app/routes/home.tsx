@@ -115,6 +115,10 @@ function Broadcasting({
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
       <MediaStream mediaStream={mediaStream} />
       {remoteMediaStreams.map(({ mediaStream }) => {
+        if (!mediaStream.active) {
+          return null;
+        }
+
         return <MediaStream mediaStream={mediaStream} key={mediaStream.id} />;
       })}
     </div>

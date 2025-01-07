@@ -15,6 +15,13 @@
       "when": 1735988352412,
       "tag": "0001_flimsy_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1736160364025,
+      "tag": "0002_powerful_greymalkin",
+      "breakpoints": true
     }
   ]
 }

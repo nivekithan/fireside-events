@@ -5,7 +5,6 @@ export const TracksTable = sqliteTable(
 	{
 		id: integer().notNull().primaryKey({ autoIncrement: true }),
 		name: text().notNull(),
-		mid: text().notNull(),
 		sessionId: text().notNull(),
 	},
 	(t) => {
