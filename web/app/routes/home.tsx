@@ -11,6 +11,7 @@ import {
 } from "~/components/ui/card";
 import { Spinner } from "~/components/ui/spinner";
 import invariant from "tiny-invariant";
+import { Button } from "~/components/ui/button";
 
 export function clientLoader({}: Route.ClientLoaderArgs) {
   const publicId = getPublicId();
@@ -112,15 +113,20 @@ function Broadcasting({
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
-      <MediaStream mediaStream={mediaStream} />
-      {remoteMediaStreams.map(({ mediaStream }) => {
-        if (!mediaStream.active) {
-          return null;
-        }
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
+        <MediaStream mediaStream={mediaStream} />
+        {remoteMediaStreams.map(({ mediaStream }) => {
+          if (!mediaStream.active) {
+            return null;
+          }
 
-        return <MediaStream mediaStream={mediaStream} key={mediaStream.id} />;
-      })}
+          return <MediaStream mediaStream={mediaStream} key={mediaStream.id} />;
+        })}
+      </div>
+      <div className="bottom-0 left-0 right-0 p-3 absolute">
+        <Button type="button">Toggle Video</Button>
+      </div>
     </div>
   );
 }

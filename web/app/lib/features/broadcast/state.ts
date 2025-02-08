@@ -156,46 +156,12 @@ export const broadcastMachine = setup({
     },
   },
   actors: {
-    setOfferToRTCPeerConnection: fromPromise(
-      async ({
-        input: { offer, rtcPeerConnection },
-      }: {
-        input: { offer: string; rtcPeerConnection: RTCPeerConnection };
-      }) => {
-        await rtcPeerConnection.setRemoteDescription(
-          new RTCSessionDescription({ type: "offer", sdp: offer })
-        );
-
-        const newAnswer = await rtcPeerConnection.createAnswer();
-
-        rtcPeerConnection.setLocalDescription(
-          new RTCSessionDescription({ type: "answer", sdp: newAnswer.sdp })
-        );
-
-        if (!newAnswer.sdp) {
-          throw new Error(`Unable to generate newAnswer`);
-        }
-
-        return { newAnswer: { type: "answer", sdp: newAnswer.sdp } };
-      }
-    ),
-    setAnswerToRTCPeerConnection: fromPromise(
-      async ({
-        input: { answer, rtcPeerConnection },
-      }: {
-        input: { rtcPeerConnection: RTCPeerConnection; answer: string };
-      }) => {
-        return rtcPeerConnection.setRemoteDescription(
-          new RTCSessionDescription({ type: "answer", sdp: answer })
-        );
-      }
-    ),
     getPermissionStatus: fromPromise(async () => {
-      const permissionStatus = await navigator.permissions.query({
+      const cameraPermissionStatus = await navigator.permissions.query({
         name: "camera" as any,
       });
 
-      return permissionStatus.state;
+      return cameraPermissionStatus.state;
     }),
 
     askForPermission: fromPromise(async () => {
