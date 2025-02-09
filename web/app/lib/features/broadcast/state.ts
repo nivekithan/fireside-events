@@ -2,8 +2,16 @@ import { AnyActorRef, assign, fromPromise, setup, spawnChild } from "xstate";
 import { getPublicId } from "../identity";
 import invariant from "tiny-invariant";
 import { bk } from "../bk";
-import { pushRemoteTracks, removeRemoteTracks } from "./calls";
+import {
+  createNewSession,
+  pushLocalTracks,
+  pushRemoteTracks,
+  removeRemoteTracks,
+} from "./calls";
 import { Signaling } from "./signaling";
+import { callsTracer, makeParentSpanCtx } from "~/lib/traces/trace.client";
+import { context, SpanStatusCode, trace } from "@opentelemetry/api";
+import { addNewTransreciver, createNewRtcConnection } from "./rtc";
 
 export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
@@ -283,77 +291,56 @@ export const broadcastMachine = setup({
 
     broadcastLocalMediaStream: fromPromise(
       async ({ input }: { input: { mediaStream: MediaStream } }) => {
-        const sessionIdentityTokenRes = await bk.calls.sessions.new.$post({
-          json: {
-            userSessionId: getPublicId(),
-            room: "DEFAULT",
-          },
-        });
+        return await callsTracer.startActiveSpan(
+          "broadcastLocalMediaStream",
+          async (rootSpan) => {
+            const ctx = makeParentSpanCtx(rootSpan);
+            const sessionIdentityToken = await createNewSession({
+              ctx: ctx,
+            });
 
-        const sessionIdentityToken = (await sessionIdentityTokenRes.json()).data
-          .sessionIdentityToken;
+            const localMediaStream = input.mediaStream;
+            const rtcConnection = createNewRtcConnection();
 
-        const localMediaStream = input.mediaStream;
+            const { sdp, tracks, transrecivers } = await addNewTransreciver({
+              mediaStream: localMediaStream,
+              rtcConnection,
+              ctx: ctx,
+            });
 
-        const rtcConnection = new RTCPeerConnection({
-          iceServers: [
-            {
-              urls: "stun:stun.cloudflare.com:3478",
-            },
-          ],
-          bundlePolicy: "max-bundle",
-        });
+            const pushLocalTracksData = await pushLocalTracks({
+              sdp,
+              sessionIdentityToken,
+              tracks,
+              ctx,
+            });
 
-        const transrecivers = localMediaStream.getTracks().map((t) => {
-          return rtcConnection.addTransceiver(t, { direction: "sendonly" });
-        });
-        const localOffer = await rtcConnection.createOffer();
+            if (!pushLocalTracksData) {
+              throw new Error(
+                `Expected data to be returned from pushLocalTracks`
+              );
+            }
 
-        await rtcConnection.setLocalDescription(localOffer);
+            const answerSdp = pushLocalTracksData.sessionDescription?.sdp;
 
-        const tracks = transrecivers.map((t) => {
-          const mid = t.mid;
-          const trackName = t.sender.track?.id;
+            if (!answerSdp) {
+              throw new Error(`Expected answer sdp to be returned`);
+            }
 
-          if (!mid || !trackName) {
-            throw new Error(`Expected mid and trackName to be defined`);
+            await rtcConnection.setRemoteDescription({
+              type: "answer",
+              sdp: answerSdp,
+            });
+
+            rootSpan.end();
+
+            return {
+              sessionIdentityToken,
+              rtcConnection,
+              transrecivers,
+            };
           }
-
-          return { location: "local", mid, trackName } as const;
-        });
-
-        const sdp = localOffer.sdp;
-
-        if (!sdp) {
-          throw new Error(`Expected sdp to be generated`);
-        }
-
-        const pushLocalTracksRes = await bk.calls.tracks.new.$post({
-          header: { "x-session-identity-token": sessionIdentityToken },
-          json: {
-            sessionDescription: { type: "offer", sdp: sdp },
-            tracks: tracks,
-          },
-        });
-
-        const pushLocalTracksData = await pushLocalTracksRes.json();
-
-        if (!pushLocalTracksData.data) {
-          throw new Error(`Expected data to be returned from pushLocalTracks`);
-        }
-
-        const answerSdp = pushLocalTracksData.data.sessionDescription?.sdp;
-
-        if (!answerSdp) {
-          throw new Error(`Expected answer sdp to be returned`);
-        }
-
-        await rtcConnection.setRemoteDescription({
-          type: "answer",
-          sdp: answerSdp,
-        });
-
-        return { sessionIdentityToken, rtcConnection, transrecivers };
+        );
       }
     ),
 

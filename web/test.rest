@@ -1,0 +1,29 @@
+POST http://localhost:4319/v1/traces
+Content-Type: application/json
+
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": []
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "fireside-events"
+          },
+          "spans": [
+            {
+              "traceId": "3a1089d5f7353b9d32f427553dc1fcbc",
+              "spanId": "a260f84df26cb6aa",
+              "name": "broadcastLocalMediaStream",
+              "startTimeUnixNano": 1739018374325000000,
+              "endTimeUnixNano": 1739018381291000000,
+              "kind": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
