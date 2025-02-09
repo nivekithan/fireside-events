@@ -4,9 +4,11 @@ import invariant from "tiny-invariant";
 import { bk } from "../bk";
 import {
   createNewSession,
+  getOtherPeersLocalTracks,
   pushLocalTracks,
   pushRemoteTracks,
   removeRemoteTracks,
+  renegotiateSession,
 } from "./calls";
 import { Signaling } from "./signaling";
 import { callsTracer, makeParentSpanCtx } from "~/lib/traces/trace.client";
@@ -360,146 +362,118 @@ export const broadcastMachine = setup({
           currentRoomVersion: number;
         };
       }) => {
-        const res = await bk.calls.local_tracks.$get({
-          header: { "x-session-identity-token": sessionIdentityToken },
-        });
+        return await callsTracer.startActiveSpan(
+          "syncWithRoom",
+          async (span) => {
+            try {
+              const { remoteTracks, version } = await getOtherPeersLocalTracks({
+                ctx: makeParentSpanCtx(span),
+                sessionIdentityToken: sessionIdentityToken,
+              });
 
-        const {
-          data: { tracks: remoteTracks, version },
-        } = await res.json();
+              if (currentRoomVersion === version) {
+                console.info(`Room is already in sync`);
+                return { version };
+              }
 
-        if (currentRoomVersion === version) {
-          console.info(`Room is already in sync`);
-          return { version };
-        }
+              const { toAdd, toRemove } = signlaing.findDiff({
+                final: remoteTracks,
+              });
 
-        const { toAdd, toRemove } = signlaing.findDiff({ final: remoteTracks });
+              if (toAdd.length !== 0) {
+                span.addEvent("adding new tracks", {
+                  tracksLength: toAdd.length,
+                });
 
-        console.log({ toRemove });
-        // TODO: Handle toRemove
+                const { tracks: successfullyPushedTracks, sessionDescription } =
+                  await pushRemoteTracks({
+                    sessionIdentityToken,
+                    tracks: toAdd.map((t) => ({
+                      name: t.name,
+                      remoteSessionId: t.sessionId,
+                    })),
+                    ctx: makeParentSpanCtx(span),
+                  });
 
-        if (toAdd.length !== 0) {
-          const pushRemoteTracksRes = await pushRemoteTracks({
-            sessionIdentityToken,
-            tracks: toAdd.map((t) => ({
-              name: t.name,
-              remoteSessionId: t.sessionId,
-            })),
-          });
+                signlaing.syncedTracks.push(...successfullyPushedTracks);
 
-          if (!pushRemoteTracksRes || !pushRemoteTracksRes.tracks) {
-            throw new Error(`Expected pushRemoteTracksRes to be defined`);
-          }
+                await rtcPeerConnection.setRemoteDescription({
+                  sdp: sessionDescription.sdp,
+                  type: sessionDescription.type,
+                });
 
-          const sucessfullyPushedTracks = pushRemoteTracksRes.tracks
-            ?.map((t) => {
-              // If pushing some tracks failed. Log them as warning
-              // TODO: Handle this better
+                console.count("Sync With Room");
+                const answer = await rtcPeerConnection.createAnswer();
 
-              if (t.error) {
-                console.warn(
-                  `Pushing track: ${t.trackName} of remoteSession: ${t.sessionId} failed due to ${t.error.errorCode}: ${t.error.errorDescription}`
+                await rtcPeerConnection.setLocalDescription(answer);
+
+                if (!answer.sdp || answer.type !== "answer") {
+                  throw new Error(
+                    `[UNREACHABLE] Expected answer to be generated`
+                  );
+                }
+
+                await renegotiateSession({
+                  ctx: makeParentSpanCtx(span),
+                  sessionDescription: { sdp: answer.sdp, type: answer.type },
+                  sessionIdentityToken,
+                });
+              }
+
+              if (toRemove.length !== 0) {
+                span.addEvent("removing tracks", {
+                  tracksLength: toRemove.length,
+                });
+
+                rtcPeerConnection.getTransceivers().forEach((t) => {
+                  const isTransreciverStopped = Boolean(
+                    toRemove.find((r) => r.mid === t.mid)
+                  );
+
+                  if (isTransreciverStopped) {
+                    t.stop();
+                  }
+                });
+
+                const offer = await rtcPeerConnection.createOffer();
+
+                invariant(offer.sdp, `Expected offer sdp to be generated`);
+
+                await rtcPeerConnection.setLocalDescription(offer);
+
+                const removeTracksResponse = await removeRemoteTracks({
+                  tracks: toRemove,
+                  sessionIdentityToken,
+                  sessionDescription: { sdp: offer.sdp, type: "offer" },
+                  ctx: makeParentSpanCtx(span),
+                });
+
+                console.log(`Remove tracks response`, removeTracksResponse);
+
+                const answer = removeTracksResponse?.sessionDescription;
+
+                invariant(
+                  answer,
+                  `remove tracks response should have sessionDescription`
                 );
-                return null;
+                invariant(answer.sdp, `Expected answer sdp to be defined`);
+
+                await rtcPeerConnection.setRemoteDescription({
+                  sdp: answer.sdp,
+                  type: "answer",
+                });
+
+                signlaing.syncedTracks = signlaing.syncedTracks.filter(
+                  (t) => !toRemove.find((r) => r.mid === t.mid)
+                );
               }
 
-              const mid = t.mid;
-              const name = t.trackName;
-              const sessionId = t.sessionId;
-
-              if (!mid || !name || !sessionId) {
-                console.warn(`Invalid track data: ${JSON.stringify(t)}`);
-                return null;
-              }
-
-              return { mid: mid, name: name, sessionId: sessionId };
-            })
-            .filter(Boolean);
-          signlaing.syncedTracks.push(...sucessfullyPushedTracks);
-
-          const offerFromCalls = pushRemoteTracksRes?.sessionDescription;
-
-          if (!offerFromCalls) {
-            throw new Error(
-              `Expected offer to be returned from calls: ${JSON.stringify(
-                pushRemoteTracksRes
-              )}`
-            );
-          }
-
-          const { sdp, type } = offerFromCalls;
-
-          if (!sdp || !type) {
-            throw new Error(`Expected sdp and type to be returned from calls`);
-          }
-
-          await rtcPeerConnection.setRemoteDescription({ sdp, type });
-
-          console.count("Sync With Room");
-          const answer = await rtcPeerConnection.createAnswer();
-
-          await rtcPeerConnection.setLocalDescription(answer);
-
-          if (!answer.sdp || answer.type !== "answer") {
-            throw new Error(`[UNREACHABLE] Expected answer to be generated`);
-          }
-
-          const regenotiateRes = await bk.calls.sessions.renegotiate.$put({
-            header: { "x-session-identity-token": sessionIdentityToken },
-            json: {
-              sessionDescription: { sdp: answer.sdp, type: answer.type },
-            },
-          });
-
-          const regenotiateData = await regenotiateRes.json();
-
-          console.log(`Regneotiate Respone data`, regenotiateData);
-        }
-
-        if (toRemove.length !== 0) {
-          rtcPeerConnection.getTransceivers().forEach((t) => {
-            const isTransreciverStopped = Boolean(
-              toRemove.find((r) => r.mid === t.mid)
-            );
-
-            if (isTransreciverStopped) {
-              t.stop();
+              return { version };
+            } finally {
+              span.end();
             }
-          });
-
-          const offer = await rtcPeerConnection.createOffer();
-
-          invariant(offer.sdp, `Expected offer sdp to be generated`);
-
-          await rtcPeerConnection.setLocalDescription(offer);
-
-          const removeTracksResponse = await removeRemoteTracks({
-            tracks: toRemove,
-            sessionIdentityToken,
-            sessionDescription: { sdp: offer.sdp, type: "offer" },
-          });
-
-          console.log(`Remove tracks response`, removeTracksResponse);
-
-          const answer = removeTracksResponse?.sessionDescription;
-
-          invariant(
-            answer,
-            `remove tracks response should have sessionDescription`
-          );
-          invariant(answer.sdp, `Expected answer sdp to be defined`);
-
-          await rtcPeerConnection.setRemoteDescription({
-            sdp: answer.sdp,
-            type: "answer",
-          });
-
-          signlaing.syncedTracks = signlaing.syncedTracks.filter(
-            (t) => !toRemove.find((r) => r.mid === t.mid)
-          );
-        }
-
-        return { version };
+          }
+        );
       }
     ),
   },
