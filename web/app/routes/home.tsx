@@ -87,6 +87,8 @@ function Broadcasting({
   const rtcConnection = state.context.rtcPeerConnection;
   const signaling = state.context.signaling;
   const screenShareStream = state.context.localScreenShareStream?.mediaStream;
+  const [selectedStream, setSelectedStream] = React.useState<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = React.useState(false);
 
   // Check if video is enabled based on state machine
   const isVideoEnabled = state.matches({
@@ -113,6 +115,17 @@ function Broadcasting({
     };
   }, [mediaStream, remoteMediaStreams, rtcConnection, state, signaling]);
 
+  // Handle smooth transition when selecting/deselecting streams
+  useEffect(() => {
+    if (selectedStream !== null || isTransitioning) {
+      setIsTransitioning(true);
+      const timer = setTimeout(() => {
+        setIsTransitioning(false);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedStream]);
+
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 
   function toggleVideoSharing() {
@@ -123,64 +136,130 @@ function Broadcasting({
     }
   }
 
+  // Collect all streams for rendering
+  const allStreams = [
+    {
+      id: "local",
+      mediaStream: mediaStream,
+      enabled: isVideoEnabled,
+      name: "You (Local)",
+      isMuted: !isVideoEnabled
+    },
+    ...(screenShareStream 
+      ? [{
+          id: "screen-share",
+          mediaStream: screenShareStream,
+          enabled: true,
+          name: "Your Screen",
+          isMuted: false
+        }] 
+      : []),
+    ...remoteMediaStreams.map((stream, index) => ({
+      id: stream.mediaStream.id,
+      mediaStream: stream.mediaStream,
+      enabled: stream.enabled,
+      name: `Participant ${index + 1}`,
+      isMuted: !stream.enabled
+    }))
+  ].filter(stream => stream.mediaStream.active);
+
+  // If we have a selected stream
+  const hasSelectedStream = selectedStream !== null;
+  const featuredStream = hasSelectedStream 
+    ? allStreams.find(stream => stream.id === selectedStream)
+    : null;
+
   return (
-    <div className="flex flex-col h-full w-full">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 flex-grow">
-        <div className="relative aspect-square">
-          <MediaStream mediaStream={mediaStream} isMuted={!isVideoEnabled} />
-          <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
-            <span>You (Local)</span>
-            {!isVideoEnabled && (
-              <span className="bg-red-500 text-white text-xs px-1 py-0.5 rounded">
-                Muted
-              </span>
-            )}
-          </div>
-        </div>
-        {screenShareStream ? (
-          <div className="relative aspect-square">
-            <MediaStream mediaStream={screenShareStream} />
-            <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded">
-              <span>Your Screen</span>
+    <div className="h-full w-full flex flex-col">
+      {/* Grid view of all streams (always present, just hidden when a stream is featured) */}
+      <div 
+        className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 pb-20 place-items-center h-full ${
+          featuredStream ? 'opacity-0 absolute inset-0 pointer-events-none' : 'opacity-100'
+        } transition-opacity duration-300 ease-in-out`}
+      >
+        {allStreams.map((stream) => (
+          <div 
+            key={stream.id}
+            className="relative aspect-square w-full max-w-xs cursor-pointer rounded-lg overflow-hidden
+                     hover:ring-2 hover:ring-blue-500 transform hover:scale-[1.02] 
+                     transition-all duration-200 shadow-md"
+            onClick={() => setSelectedStream(stream.id)}
+          >
+            <MediaStream 
+              mediaStream={stream.mediaStream} 
+              isMuted={stream.isMuted} 
+            />
+            <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
+              <span>{stream.name}</span>
+              {!stream.enabled && (
+                <span className="bg-red-500 text-white text-xs px-1 py-0.5 rounded">
+                  Muted
+                </span>
+              )}
             </div>
           </div>
-        ) : null}
-        {remoteMediaStreams.map(({ mediaStream, enabled }, index) => {
-          if (!mediaStream.active) {
-            return null;
-          }
+        ))}
+      </div>
 
-          return (
-            <div className="relative aspect-square" key={mediaStream.id}>
-              <MediaStream mediaStream={mediaStream} isMuted={!enabled} />
-              <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
-                <span>Participant {index + 1}</span>
-                {!enabled && (
-                  <span className="bg-red-500 text-white text-xs px-1 py-0.5 rounded">
+      {/* Featured stream view */}
+      <div 
+        className={`absolute inset-0 bg-gray-900/90 z-10 flex items-center justify-center
+                  ${featuredStream ? 'opacity-100' : 'opacity-0 pointer-events-none'} 
+                  transition-opacity duration-300 ease-in-out`}
+      >
+        {featuredStream && (
+          <>
+            <div 
+              className="absolute top-16 inset-x-0 flex justify-between items-center p-4 bg-black/40 z-10"
+            >
+              <div className="text-white font-medium flex items-center">
+                <button
+                  onClick={() => setSelectedStream(null)}
+                  className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 mr-4 rounded-md 
+                          text-sm transition-colors flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                  </svg>
+                  Back
+                </button>
+                {featuredStream.name}
+              </div>
+            </div>
+            <div className="relative w-full max-w-4xl mx-auto px-4 pt-16 pb-24">
+              <div className="relative w-full rounded-lg overflow-hidden shadow-2xl">
+                <MediaStream 
+                  mediaStream={featuredStream.mediaStream} 
+                  isMuted={featuredStream.isMuted} 
+                />
+                {!featuredStream.enabled && (
+                  <div className="absolute bottom-4 left-4 bg-red-500 text-white text-sm px-2 py-1 rounded">
                     Muted
-                  </span>
+                  </div>
                 )}
               </div>
             </div>
-          );
-        })}
+          </>
+        )}
       </div>
-      <div className="bottom-0 left-0 right-0 p-5 absolute bg-black/20 backdrop-blur-sm flex justify-center gap-4">
+
+      {/* Control buttons - always present */}
+      <div className="bottom-0 left-0 right-0 absolute bg-black/20 backdrop-blur-sm flex justify-center gap-4 z-20 py-5 px-4">
         <Button
           type="button"
           onClick={toggleVideoSharing}
-          className={`rounded-full w-12 h-12 flex items-center justify-center ${
-            !isVideoEnabled ? "bg-red-500 hover:bg-red-600" : ""
-          }`}
+          className={`rounded-full w-12 h-12 flex items-center justify-center shadow-lg
+                    ${!isVideoEnabled ? "bg-red-500 hover:bg-red-600" : "bg-gray-800 hover:bg-gray-700"}
+                    transition-colors duration-200`}
         >
           {isVideoEnabled ? "🎥" : "🚫"}
         </Button>
         <Button
           type="button"
           onClick={() => send({ type: "startScreenShare" })}
-          className={`rounded-full w-12 h-12 flex items-center justify-center ${
-            screenShareStream ? "bg-blue-500 hover:bg-blue-600" : ""
-          }`}
+          className={`rounded-full w-12 h-12 flex items-center justify-center shadow-lg
+                    ${screenShareStream ? "bg-blue-500 hover:bg-blue-600" : "bg-gray-800 hover:bg-gray-700"}
+                    transition-colors duration-200`}
         >
           📺
         </Button>
@@ -263,7 +342,6 @@ function MediaStream({
         playsInline
         muted
         className="w-full h-full object-cover bg-gray-900 rounded-lg shadow-md"
-        style={{ aspectRatio: "1/1" }}
       />
       {isMuted && (
         <div className="absolute inset-0">
