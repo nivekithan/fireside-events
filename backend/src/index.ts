@@ -1,5 +1,6 @@
 import { routePartykitRequest } from 'partyserver';
 import { app } from './server';
+import { DurableObject } from 'cloudflare:workers';
 
 export { RoomManager } from './features/broadcast/roomManager/roomManager';
 
