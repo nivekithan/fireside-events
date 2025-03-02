@@ -127,11 +127,16 @@ function Broadcasting({
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 flex-grow">
         <div className="relative">
           <MediaStream mediaStream={mediaStream} />
-          <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded">
-            You (Local)
+          <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
+            <span>You (Local)</span>
+            {!isVideoEnabled && (
+              <span className="bg-red-500 text-white text-xs px-1 py-0.5 rounded">
+                Muted
+              </span>
+            )}
           </div>
         </div>
-        {remoteMediaStreams.map(({ mediaStream }, index) => {
+        {remoteMediaStreams.map(({ mediaStream, enabled, sessionId, name }, index) => {
           if (!mediaStream.active) {
             return null;
           }
@@ -139,8 +144,13 @@ function Broadcasting({
           return (
             <div className="relative" key={mediaStream.id}>
               <MediaStream mediaStream={mediaStream} />
-              <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded">
-                Participant {index + 1}
+              <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
+                <span>Participant {index + 1}</span>
+                {!enabled && (
+                  <span className="bg-red-500 text-white text-xs px-1 py-0.5 rounded">
+                    Muted
+                  </span>
+                )}
               </div>
             </div>
           );

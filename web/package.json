@@ -19,6 +19,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "hono": "^4.6.9",
+    "immer": "^10.1.1",
     "isbot": "^5.1.17",
     "lucide-react": "^0.468.0",
     "neverthrow": "^8.1.1",

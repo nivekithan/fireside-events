@@ -18,6 +18,7 @@ import {
 import { Signaling } from "./signaling";
 import { callsTracer, makeParentSpanCtx } from "~/lib/traces/trace.client";
 import { addNewTransreciver, createNewRtcConnection } from "./rtc";
+import { produce } from "immer";
 
 export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
@@ -25,13 +26,17 @@ export type BroadcastMachineEvents =
   | { type: "permissionPending" }
   | {
       type: "newMediaStream";
-      mediaStream: { mediaStream: MediaStream; trackMids: string[] };
-    }
-  | {
-      type: "poke";
+      mediaStream: {
+        mediaStream: MediaStream;
+        trackMid: string;
+        enabled: boolean;
+      };
     }
   | { type: "pauseVideo" }
-  | { type: "broadcastVideo" };
+  | { type: "broadcastVideo" }
+  | { type: "poke" }
+  | { type: "resume_remote_video"; sessionId: string; name: string }
+  | { type: "pause_remote_video"; sessionId: string; name: string };
 
 export const broadcastMachine = setup({
   guards: {
@@ -64,24 +69,92 @@ export const broadcastMachine = setup({
       signaling: Signaling | null;
       remoteMediaStreams: Array<{
         mediaStream: MediaStream;
-        trackMids: string[];
+        trackMid: string;
+        enabled: boolean;
+        sessionId: string;
+        name: string;
       }>;
       roomVersion: number;
     },
     events: {} as BroadcastMachineEvents,
   },
   actions: {
+    setEnabledToRemoteVideo: assign(
+      (
+        { context },
+        {
+          name,
+          sessionId,
+          newEnabledState,
+        }: { sessionId: string; name: string; newEnabledState: boolean }
+      ) => {
+        const newContext = produce(context, (context) => {
+          const trackToToggle = context.remoteMediaStreams.find(
+            (t) => t.sessionId === sessionId && t.name === name
+          );
+
+          if (!trackToToggle) {
+            return context;
+          }
+
+          trackToToggle.enabled = newEnabledState;
+
+          return context;
+        });
+
+        return newContext;
+      }
+    ),
+
     toggleLocalVideo: ({ context }) => {
       const localMediaStream = context.localMediaStream;
+      const signaling = context.signaling;
+      const sessionIdentityToken = context.sessionIdentityToken;
 
       invariant(
         localMediaStream,
         `Expected local media stream to be defined before calling toggleLocalVideo`
       );
+      invariant(
+        signaling,
+        `Expected signaling be defined before calling toggleLocalVideo`
+      );
+      invariant(
+        sessionIdentityToken,
+        `Expected sessionIdentityToken be defined before calling toggleLocalVideo`
+      );
 
-      localMediaStream.getTracks().forEach((t) => {
-        t.enabled = !t.enabled;
-      });
+      const tracks = localMediaStream.getTracks();
+
+      if (tracks.length > 1) {
+        throw new Error("Did not expect more than 1 tracks");
+      }
+
+      if (tracks.length === 0) {
+        throw new Error("Expected atleast 1 tracks");
+      }
+
+      const track = tracks[0];
+      const trackName = track.id;
+
+      const newState = !track.enabled;
+
+      if (newState === true) {
+        // We are resuming the video
+        signaling.send({
+          type: "resume_video",
+          name: trackName,
+          token: sessionIdentityToken,
+        });
+      } else {
+        signaling.send({
+          type: "pause_video",
+          name: trackName,
+          token: sessionIdentityToken,
+        });
+      }
+
+      track.enabled = newState;
     },
 
     spawnSignalingListener: assign(({ self, context }) => {
@@ -130,10 +203,31 @@ export const broadcastMachine = setup({
     assignNewRemoteMediaStream: assign(
       (
         { context },
-        mediaStream: { mediaStream: MediaStream; trackMids: string[] }
+        mediaStream: {
+          mediaStream: MediaStream;
+          trackMid: string;
+          enabled: boolean;
+        }
       ) => {
+        const signaling = context.signaling;
+
+        invariant(signaling, "Expected signaling to be defined");
+
+        const syncedTrack = signaling.syncedTracks.find(
+          (t) => t.mid === mediaStream.trackMid
+        );
+
+        invariant(syncedTrack, "Expected synced track to be defined");
+
         return {
-          remoteMediaStreams: [...context.remoteMediaStreams, mediaStream],
+          remoteMediaStreams: [
+            ...context.remoteMediaStreams,
+            {
+              ...mediaStream,
+              sessionId: syncedTrack.sessionId,
+              name: syncedTrack.name,
+            },
+          ],
         };
       }
     ),
@@ -253,7 +347,11 @@ export const broadcastMachine = setup({
 
           parentMachine.send({
             type: "newMediaStream",
-            mediaStream: { mediaStream: newMediaStream, trackMids: [mId] },
+            mediaStream: {
+              mediaStream: newMediaStream,
+              trackMid: mId,
+              enabled: e.track.enabled,
+            },
           } satisfies BroadcastMachineEvents);
         }
 
@@ -659,6 +757,30 @@ export const broadcastMachine = setup({
             type: "assignNewRemoteMediaStream",
             params({ event }) {
               return event.mediaStream;
+            },
+          },
+        },
+        pause_remote_video: {
+          actions: {
+            type: "setEnabledToRemoteVideo",
+            params({ event }) {
+              return {
+                name: event.name,
+                sessionId: event.sessionId,
+                newEnabledState: false,
+              };
+            },
+          },
+        },
+        resume_remote_video: {
+          actions: {
+            type: "setEnabledToRemoteVideo",
+            params({ event }) {
+              return {
+                name: event.name,
+                sessionId: event.sessionId,
+                newEnabledState: true,
+              };
             },
           },
         },

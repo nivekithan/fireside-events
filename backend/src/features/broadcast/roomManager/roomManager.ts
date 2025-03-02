@@ -5,9 +5,10 @@ import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import { RoomVersionTable, TracksTable } from './schema';
 import { eq, ne } from 'drizzle-orm';
 import { WithEnv } from '../../hono';
-import { Connection, Server } from 'partyserver';
-import { ServerSentMessages } from 'signaling-messages';
+import { Connection, Server, WSMessage } from 'partyserver';
+import { ClientSentMessage, ServerSentMessages } from 'signaling-messages';
 import { verifySessionIdentiyToken } from '../../identity';
+import invariant from 'tiny-invariant';
 
 const LocalTracksSchema = z.object({
 	name: z.string(),
@@ -34,6 +35,22 @@ export class RoomManager extends Server<Env> {
 
 	async onStart(): Promise<void> {
 		return this.migrate();
+	}
+
+	async onMessage(connection: Connection, message: WSMessage): Promise<void> {
+		invariant(typeof message === 'string', `We support only JSON messages`);
+
+		const invalidatedMessage = JSON.parse(message);
+
+		const payload = ClientSentMessage.parse(invalidatedMessage);
+
+		const { callsSessionId } = await verifySessionIdentiyToken({ jwtSecret: this.env.JWT_SECRET, token: payload.token });
+
+		if (payload.type === 'resume_video') {
+			this.#broadcastMessageToClient({ type: 'resume_remote_video', name: payload.name, sessionId: callsSessionId });
+		} else if (payload.type === 'pause_video') {
+			this.#broadcastMessageToClient({ type: 'pause_remote_video', name: payload.name, sessionId: callsSessionId });
+		}
 	}
 
 	async migrate() {

@@ -1,8 +1,9 @@
 import { PartySocket } from "partysocket";
 import { safeJsonParse } from "~/lib/neverthrow/json";
-import { parseServerSentMessages } from "signaling-messages";
+import { ClientSentMessage, parseServerSentMessages } from "signaling-messages";
 import { AnyActorRef } from "xstate";
 import { BroadcastMachineEvents } from "./state";
+import invariant from "tiny-invariant";
 
 export type SignalingTracks = { name: string; sessionId: string; mid: string };
 
@@ -53,12 +54,19 @@ export class Signaling {
       }
 
       const payload = data.value.data;
-      console.log(`[Signalling] received message: ${payload}`);
+      console.log(`[Signalling] received message: ${JSON.stringify(payload)}`);
 
       if (payload.type === "poke") {
         console.log({ paylodVersion: payload.version });
         this.version = Math.max(this.version, payload.version);
         this.#sendEventToParentMachine({ type: "poke" });
+      } else if (payload.type === "resume_remote_video") {
+        this.#sendEventToParentMachine(payload);
+      } else if (payload.type === "pause_remote_video") {
+        this.#sendEventToParentMachine(payload);
+      } else {
+        // @ts-expect-error This code should never be execuated
+        throw new Error(`[UNKNOWN] Message from server: ${payload.type}`);
       }
     });
 
@@ -91,6 +99,12 @@ export class Signaling {
 
     this.#partySocket.close();
     this.#partySocket = null;
+  }
+
+  send(message: ClientSentMessage) {
+    invariant(this.#partySocket, "Party socket is not yet defined");
+
+    this.#partySocket.send(JSON.stringify(message));
   }
 
   #sendEventToParentMachine(event: BroadcastMachineEvents) {

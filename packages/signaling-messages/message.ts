@@ -9,11 +9,13 @@ export const PokeMessage = z.object({
 export const PauseRemoteVideoMessage = z.object({
   type: z.literal("pause_remote_video"),
   name: z.string(),
+  sessionId: z.string(),
 });
 
 export const ResumeRemoteVideoMessage = z.object({
   type: z.literal("resume_remote_video"),
   name: z.string(),
+  sessionId: z.string(),
 });
 
 export const ServerSentMessages = z.discriminatedUnion("type", [
@@ -25,11 +27,15 @@ export const ServerSentMessages = z.discriminatedUnion("type", [
 export type ServerSentMessages = z.infer<typeof ServerSentMessages>;
 
 export const PauseVideoMessage = z.object({
-  type: z.literal("pause_viedo"),
+  type: z.literal("pause_video"),
+  name: z.string(),
+  token: z.string(),
 });
 
 export const ResumeVideoMessage = z.object({
   type: z.literal("resume_video"),
+  name: z.string(),
+  token: z.string(),
 });
 
 export const ClientSentMessage = z.discriminatedUnion("type", [
