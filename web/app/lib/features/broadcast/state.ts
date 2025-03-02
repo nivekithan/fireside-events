@@ -1,7 +1,5 @@
 import { AnyActorRef, assign, fromPromise, setup, spawnChild } from "xstate";
-import { getPublicId } from "../identity";
 import invariant from "tiny-invariant";
-import { bk } from "../bk";
 import {
   createNewSession,
   getOtherPeersLocalTracks,
@@ -12,7 +10,6 @@ import {
 } from "./calls";
 import { Signaling } from "./signaling";
 import { callsTracer, makeParentSpanCtx } from "~/lib/traces/trace.client";
-import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { addNewTransreciver, createNewRtcConnection } from "./rtc";
 
 export type BroadcastMachineEvents =
@@ -52,10 +49,6 @@ export const broadcastMachine = setup({
       rtcPeerConnection: null | RTCPeerConnection;
       sessionIdentityToken: string | null;
       signaling: Signaling | null;
-      internal: {
-        answer: string | null;
-        offer: string | null;
-      };
       remoteMediaStreams: Array<{
         mediaStream: MediaStream;
         trackMids: string[];
@@ -486,10 +479,6 @@ export const broadcastMachine = setup({
     sessionIdentityToken: null,
     rtcPeerConnection: null,
     roomVersion: -Infinity,
-    internal: {
-      answer: null,
-      offer: null,
-    },
     remoteMediaStreams: [],
   },
 
@@ -549,7 +538,7 @@ export const broadcastMachine = setup({
               return event.output;
             },
           },
-          target: "broadcasting",
+          target: "joiningRoom",
         },
         onError: {
           target: "unableToGetMediaStream",
@@ -577,7 +566,7 @@ export const broadcastMachine = setup({
       invoke: {
         src: "askForPermission",
         onDone: {
-          target: "broadcasting",
+          target: "joiningRoom",
           actions: {
             type: "assignLocalMediaStream",
             params({ event }) {
@@ -597,144 +586,40 @@ export const broadcastMachine = setup({
         permissionGranted: "permissionGranted",
       },
     },
+    joiningRoom: {
+      invoke: {
+        src: "broadcastLocalMediaStream",
+        input: ({ context }) => {
+          const localMediaStream = context.localMediaStream;
+
+          invariant(
+            localMediaStream,
+            `Expected localMediaStream to be defined before entering joiningRoom state`
+          );
+
+          return { mediaStream: localMediaStream };
+        },
+        onDone: {
+          target: "broadcasting",
+          actions: [
+            {
+              type: "assignRtcPeerConnection",
+              params({ event }) {
+                return event.output.rtcConnection;
+              },
+            },
+            {
+              type: "assignSessionIdentityToken",
+              params({ event }) {
+                return event.output.sessionIdentityToken;
+              },
+            },
+          ],
+        },
+      },
+    },
     broadcasting: {
-      entry: [{ type: "spawnSignalingListener" }],
-      exit: [{ type: "stopSignalingListener" }],
-      on: {
-        permissionDenied: "permissionDenied",
-        permissionPending: "permissionPending",
-
-        newMediaStream: {
-          actions: {
-            type: "assignNewRemoteMediaStream",
-            params({ event }) {
-              return event.mediaStream;
-            },
-          },
-        },
-      },
-      initial: "joiningRoom",
-      states: {
-        joiningRoom: {
-          invoke: {
-            src: "broadcastLocalMediaStream",
-
-            input: ({ context }) => {
-              if (!context.localMediaStream) {
-                throw new Error(`Expected localMediaStream to be initialized`);
-              }
-
-              return { mediaStream: context.localMediaStream };
-            },
-            onDone: {
-              actions: [
-                {
-                  type: "assignRtcPeerConnection",
-                  params({ event }) {
-                    return event.output.rtcConnection;
-                  },
-                },
-                {
-                  type: "assignSessionIdentityToken",
-                  params({ event }) {
-                    return event.output.sessionIdentityToken;
-                  },
-                },
-                {
-                  type: "connectToSignalingServer",
-                },
-                {
-                  type: "spawnRemoteTracksListener",
-                  params({ event }) {
-                    return event.output.rtcConnection;
-                  },
-                },
-              ],
-              target: "syncWithRoom",
-            },
-            onError: {
-              target: "unableToJoinRoom",
-              actions: ({ event }) => {
-                console.log(`Error while joining room`, event.error);
-              },
-            },
-          },
-        },
-        unableToJoinRoom: {},
-        syncWithRoom: {
-          invoke: {
-            src: "syncWithRoom",
-            input: ({ context }) => {
-              const rtcPeerConnection = context.rtcPeerConnection;
-              const sessionIdentityToken = context.sessionIdentityToken;
-              const signaling = context.signaling;
-
-              invariant(
-                rtcPeerConnection,
-                `Expected RTCPeerConnection to be initialized`
-              );
-              invariant(
-                sessionIdentityToken,
-                `Expected sessionIdentityToken to be initialized`
-              );
-              invariant(signaling, `Expected signaling to be initialized`);
-              return {
-                rtcPeerConnection: rtcPeerConnection,
-                sessionIdentityToken: sessionIdentityToken,
-                signlaing: signaling,
-                currentRoomVersion: context.roomVersion,
-              };
-            },
-            onDone: [
-              {
-                guard: {
-                  type: "isRoomInSync",
-                },
-                target: "joinedRoom",
-                actions: [
-                  {
-                    type: "assignNewRoomVersion",
-                    params({ event }) {
-                      return event.output.version;
-                    },
-                  },
-                ],
-              },
-              {
-                target: "syncWithRoom",
-                reenter: true,
-                actions: [
-                  {
-                    type: "assignNewRoomVersion",
-                    params({ event }) {
-                      return event.output.version;
-                    },
-                  },
-                ],
-              },
-            ],
-            onError: {
-              target: "unableToJoinRoom",
-              actions: ({ event }) => {
-                console.warn(`Error while sync with room`, event.error);
-              },
-            },
-          },
-        },
-        joinedRoom: {
-          on: {
-            poke: [
-              {
-                guard: "isRoomInSync",
-                target: "joinedRoom",
-              },
-              {
-                target: "syncWithRoom",
-              },
-            ],
-          },
-        },
-      },
+      // This state is now a sibling to joiningRoom
     },
   },
   on: {
