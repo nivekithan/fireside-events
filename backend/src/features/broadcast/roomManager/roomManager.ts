@@ -130,7 +130,10 @@ export class RoomManager extends Server<Env> {
 		return result[0].version;
 	}
 
-	#poke() {
+	async #poke() {
+		// Wait for 1 second before poking
+		// To prevent race condition from happening
+		await new Promise((r) => setTimeout(r, 1_000));
 		this.#broadcastMessageToClient({ type: 'poke', version: this.#getVersion() });
 	}
 

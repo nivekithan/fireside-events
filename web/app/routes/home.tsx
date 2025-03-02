@@ -125,22 +125,8 @@ function Broadcasting({
 
   return (
     <div className="flex flex-col h-full w-full">
-      {screenShareStream ? (
-        <div className="w-full p-4">
-          <div className="relative w-full" style={{ height: "40vh" }}>
-            <MediaStream mediaStream={screenShareStream} />
-            <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded">
-              <span>Your Screen</span>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      <div
-        className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 flex-grow ${
-          screenShareStream ? "max-h-[40vh]" : ""
-        }`}
-      >
-        <div className="relative">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 flex-grow">
+        <div className="relative aspect-square">
           <MediaStream mediaStream={mediaStream} isMuted={!isVideoEnabled} />
           <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
             <span>You (Local)</span>
@@ -151,13 +137,21 @@ function Broadcasting({
             )}
           </div>
         </div>
+        {screenShareStream ? (
+          <div className="relative aspect-square">
+            <MediaStream mediaStream={screenShareStream} />
+            <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded">
+              <span>Your Screen</span>
+            </div>
+          </div>
+        ) : null}
         {remoteMediaStreams.map(({ mediaStream, enabled }, index) => {
           if (!mediaStream.active) {
             return null;
           }
 
           return (
-            <div className="relative" key={mediaStream.id}>
+            <div className="relative aspect-square" key={mediaStream.id}>
               <MediaStream mediaStream={mediaStream} isMuted={!enabled} />
               <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
                 <span>Participant {index + 1}</span>
@@ -269,6 +263,7 @@ function MediaStream({
         playsInline
         muted
         className="w-full h-full object-cover bg-gray-900 rounded-lg shadow-md"
+        style={{ aspectRatio: "1/1" }}
       />
       {isMuted && (
         <div className="absolute inset-0">
