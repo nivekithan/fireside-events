@@ -22,7 +22,9 @@ export type BroadcastMachineEvents =
     }
   | {
       type: "poke";
-    };
+    }
+  | { type: "pauseVideo" }
+  | { type: "broadcastVideo" };
 
 export const broadcastMachine = setup({
   guards: {
@@ -58,6 +60,19 @@ export const broadcastMachine = setup({
     events: {} as BroadcastMachineEvents,
   },
   actions: {
+    toggleLocalVideo: ({ context }) => {
+      const localMediaStream = context.localMediaStream;
+
+      invariant(
+        localMediaStream,
+        `Expected local media stream to be defined before calling toggleLocalVideo`
+      );
+
+      localMediaStream.getTracks().forEach((t) => {
+        t.enabled = !t.enabled;
+      });
+    },
+
     spawnSignalingListener: assign(({ self, context }) => {
       const previousSignaling = context.signaling;
 
@@ -619,7 +634,31 @@ export const broadcastMachine = setup({
       },
     },
     broadcasting: {
-      // This state is now a sibling to joiningRoom
+      type: "parallel",
+      states: {
+        localTracks: {
+          initial: "broadcastVideo",
+          states: {
+            broadcastVideo: {
+              on: {
+                pauseVideo: {
+                  actions: "toggleLocalVideo",
+                  target: "pauseVideo",
+                },
+              },
+            },
+            pauseVideo: {
+              on: {
+                broadcastVideo: {
+                  actions: "toggleLocalVideo",
+                  target: "broadcastVideo",
+                },
+              },
+            },
+          },
+        },
+        remoteTracks: {},
+      },
     },
   },
   on: {
