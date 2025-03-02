@@ -1,4 +1,11 @@
-import { AnyActorRef, assign, fromPromise, setup, spawnChild } from "xstate";
+import {
+  AnyActorRef,
+  assign,
+  fromPromise,
+  not,
+  setup,
+  spawnChild,
+} from "xstate";
 import invariant from "tiny-invariant";
 import {
   createNewSession,
@@ -41,6 +48,10 @@ export const broadcastMachine = setup({
       const signaling = context.signaling;
 
       invariant(signaling, `Expected signaling to be initialized`);
+
+      if (signaling.version === -Infinity) {
+        return false;
+      }
 
       return context.roomVersion === signaling.version;
     },
@@ -139,12 +150,19 @@ export const broadcastMachine = setup({
     assignLocalMediaStream: assign((_, mediaStream: MediaStream) => {
       return { localMediaStream: mediaStream };
     }),
-    assignNewRoomVersion: assign((_, version: number) => {
+    assignNewRoomVersion: assign(({ context }, version: number) => {
+      const signaling = context.signaling;
+
+      if (signaling) {
+        signaling.version = Math.max(signaling.version, version);
+      }
+
       return { roomVersion: version };
     }),
 
     spawnRemoteTracksListener: assign(
       ({ spawn, self, context }, rtcConnection: RTCPeerConnection) => {
+        console.log("Running spawnRemoteTracksListener");
         spawn("listenForNewRemoteTracks", {
           id: "ListenForNewRemoteTracks",
           input: { parentMachine: self, rtcPeerConnection: rtcConnection },
@@ -359,14 +377,14 @@ export const broadcastMachine = setup({
         input: {
           sessionIdentityToken,
           rtcPeerConnection,
-          signlaing,
+          signaling,
           currentRoomVersion,
         },
       }: {
         input: {
           sessionIdentityToken: string;
           rtcPeerConnection: RTCPeerConnection;
-          signlaing: Signaling;
+          signaling: Signaling;
           currentRoomVersion: number;
         };
       }) => {
@@ -384,7 +402,7 @@ export const broadcastMachine = setup({
                 return { version };
               }
 
-              const { toAdd, toRemove } = signlaing.findDiff({
+              const { toAdd, toRemove } = signaling.findDiff({
                 final: remoteTracks,
               });
 
@@ -403,7 +421,7 @@ export const broadcastMachine = setup({
                     ctx: makeParentSpanCtx(span),
                   });
 
-                signlaing.syncedTracks.push(...successfullyPushedTracks);
+                signaling.syncedTracks.push(...successfullyPushedTracks);
 
                 await rtcPeerConnection.setRemoteDescription({
                   sdp: sessionDescription.sdp,
@@ -471,7 +489,7 @@ export const broadcastMachine = setup({
                   type: "answer",
                 });
 
-                signlaing.syncedTracks = signlaing.syncedTracks.filter(
+                signaling.syncedTracks = signaling.syncedTracks.filter(
                   (t) => !toRemove.find((r) => r.mid === t.mid)
                 );
               }
@@ -635,6 +653,16 @@ export const broadcastMachine = setup({
     },
     broadcasting: {
       type: "parallel",
+      on: {
+        newMediaStream: {
+          actions: {
+            type: "assignNewRemoteMediaStream",
+            params({ event }) {
+              return event.mediaStream;
+            },
+          },
+        },
+      },
       states: {
         localTracks: {
           initial: "broadcastVideo",
@@ -657,7 +685,90 @@ export const broadcastMachine = setup({
             },
           },
         },
-        remoteTracks: {},
+        remoteTracks: {
+          entry: [
+            "spawnSignalingListener",
+            "connectToSignalingServer",
+            {
+              type: "spawnRemoteTracksListener",
+              params({ context }) {
+                const rtcConnection = context.rtcPeerConnection;
+
+                invariant(
+                  rtcConnection,
+                  `expected rtcConnection to be defined`
+                );
+
+                return rtcConnection;
+              },
+            },
+          ],
+          exit: ["stopSignalingListener"],
+          initial: "syncWithRoom",
+          states: {
+            syncWithRoom: {
+              always: {
+                guard: "isRoomInSync",
+                target: "roomInSync",
+              },
+              invoke: {
+                src: "syncWithRoom",
+
+                input: ({ context }) => {
+                  const sessionIdentityToken = context.sessionIdentityToken;
+                  const rtcPeerConnection = context.rtcPeerConnection;
+                  const signaling = context.signaling;
+                  const currentRoomVersion = context.roomVersion;
+
+                  invariant(
+                    sessionIdentityToken,
+                    `Expected sessionIdentityToken to be defined`
+                  );
+                  invariant(
+                    rtcPeerConnection,
+                    `Expected rtcPeerConnection to be defined`
+                  );
+                  invariant(signaling, `Expected signaling to be defined`);
+                  invariant(
+                    currentRoomVersion,
+                    `Expected currentRoomVersion to be defined`
+                  );
+
+                  return {
+                    sessionIdentityToken,
+                    rtcPeerConnection,
+                    signaling,
+                    currentRoomVersion,
+                  };
+                },
+                onDone: {
+                  target: "syncWithRoom",
+                  actions: {
+                    type: "assignNewRoomVersion",
+                    params: ({ event }) => {
+                      console.log({ newVersion: event.output.version });
+                      return event.output.version;
+                    },
+                  },
+                  reenter: true,
+                },
+              },
+            },
+            roomInSync: {
+              on: {
+                poke: {
+                  target: "syncWithRoom",
+                },
+              },
+              after: {
+                1_000: {
+                  guard: not("isRoomInSync"),
+                  target: "syncWithRoom",
+                },
+              },
+            },
+          },
+        },
       },
     },
   },

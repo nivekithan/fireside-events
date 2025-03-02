@@ -15,7 +15,7 @@ import { Button } from "~/components/ui/button";
 
 export function clientLoader({}: Route.ClientLoaderArgs) {
   const publicId = getPublicId();
- 
+
   return { publicId };
 }
 
@@ -86,19 +86,16 @@ function Broadcasting({
   const remoteMediaStreams = state.context.remoteMediaStreams;
   const rtcConnection = state.context.rtcPeerConnection;
   const signaling = state.context.signaling;
-  
+
   // Check if video is enabled based on state machine
-  const isVideoEnabled = state.matches({ broadcasting: { localTracks: "broadcastVideo" } });
+  const isVideoEnabled = state.matches({
+    broadcasting: { localTracks: "broadcastVideo" },
+  });
 
   useEffect(() => {
-    console.log({
-      rtcConnection,
-      remoteMediaStreams,
-      mediaStream,
-      state,
-    });
     const interval = setInterval(() => {
       const transceivers = rtcConnection?.getTransceivers();
+      console.log("Running internval");
       console.log({
         rtcConnection,
         remoteMediaStreams,
@@ -150,12 +147,14 @@ function Broadcasting({
         })}
       </div>
       <div className="bottom-0 left-0 right-0 p-5 absolute bg-black/20 backdrop-blur-sm flex justify-center gap-4">
-        <Button 
-          type="button" 
+        <Button
+          type="button"
           onClick={toggleVideoSharing}
-          className={`rounded-full w-12 h-12 flex items-center justify-center ${!isVideoEnabled ? 'bg-red-500 hover:bg-red-600' : ''}`}
+          className={`rounded-full w-12 h-12 flex items-center justify-center ${
+            !isVideoEnabled ? "bg-red-500 hover:bg-red-600" : ""
+          }`}
         >
-          {isVideoEnabled ? '🎥' : '🚫'}
+          {isVideoEnabled ? "🎥" : "🚫"}
         </Button>
       </div>
     </div>
