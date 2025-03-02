@@ -112,6 +112,26 @@ function Broadcasting({
 
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 
+  function pauseVideoSharing() {
+    if (!rtcConnection) {
+      return;
+    }
+
+    rtcConnection.getTransceivers().forEach((t) => {
+      const isSender = t.direction === "sendonly";
+
+      if (!isSender) {
+        return;
+      }
+
+      if (!t.sender.track) {
+        return;
+      }
+
+      t.sender.track.enabled = !t.sender.track.enabled;
+    });
+  }
+
   return (
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
@@ -125,7 +145,9 @@ function Broadcasting({
         })}
       </div>
       <div className="bottom-0 left-0 right-0 p-3 absolute">
-        <Button type="button">Toggle Video</Button>
+        <Button type="button" onClick={pauseVideoSharing}>
+          Toggle Video
+        </Button>
       </div>
     </div>
   );
