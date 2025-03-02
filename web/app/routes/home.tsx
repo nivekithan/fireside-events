@@ -75,6 +75,15 @@ export default function Component({}: Route.ComponentProps) {
   }
 }
 
+// Create context to pass streams data to FeaturedStreamView
+const StreamsContext = React.createContext<Array<{
+  id: string;
+  mediaStream: MediaStream;
+  enabled: boolean;
+  name: string;
+  isMuted: boolean;
+}>>([]);
+
 function Broadcasting({
   state,
   send,
@@ -173,6 +182,7 @@ function Broadcasting({
     ? allStreams.find((stream) => stream.id === selectedStream)
     : null;
 
+
   return (
     <div className="h-full w-full flex flex-col">
       {/* Grid view of all streams (always present, just hidden when a stream is featured) */}
@@ -208,10 +218,12 @@ function Broadcasting({
       </div>
 
       {/* Featured stream view */}
-      <FeaturedStreamView
-        featuredStream={featuredStream ?? null}
-        setSelectedStream={setSelectedStream}
-      />
+      <StreamsContext.Provider value={allStreams}>
+        <FeaturedStreamView
+          featuredStream={featuredStream ?? null}
+          setSelectedStream={setSelectedStream}
+        />
+      </StreamsContext.Provider>
 
       {/* Control buttons - always present */}
       <div className="bottom-0 left-0 right-0 absolute bg-black/20 backdrop-blur-sm flex justify-center gap-4 z-20 py-5 px-4">
@@ -387,9 +399,11 @@ function FeaturedStreamView({
   } | null;
   setSelectedStream: (id: string | null) => void;
 }) {
+  // Get access to all streams from parent component
+  const allStreams = React.useContext(StreamsContext) || [];
   return (
     <div
-      className={`absolute inset-0 bg-gray-900/90 z-10 flex flex-col
+      className={`absolute inset-0 bg-gray-900/90 z-10 flex flex-col overflow-hidden
                 ${
                   featuredStream
                     ? "opacity-100"
@@ -428,7 +442,7 @@ function FeaturedStreamView({
           </div>
 
           {/* Content area */}
-          <div className="flex-1 w-full flex flex-col pt-20 px-4">
+          <div className="flex-1 w-full flex flex-col pt-20 px-4 overflow-hidden">
             <div className="flex w-full mx-auto">
               {/* Main video stream - larger and aligned left */}
               <div className="w-full md:w-4/5 pr-0 md:pr-8">
@@ -445,8 +459,35 @@ function FeaturedStreamView({
                 </div>
               </div>
 
-              {/* Space on the right side - only visible on md screens and up */}
-              <div className="hidden md:block md:w-1/5"></div>
+              {/* Other streams sidebar - only visible on md screens and up */}
+              <div className="hidden md:flex md:w-1/5 pl-4 h-[calc(100vh-140px)] flex-col">
+                <div className="bg-gray-900/80 py-2 sticky top-0 z-10">
+                  <h3 className="text-white text-sm font-medium">Other Participants</h3>
+                </div>
+                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                  <div className="flex flex-col gap-3 py-2 pb-20">
+                  {allStreams
+                    .filter(stream => stream.id !== featuredStream.id)
+                    .map(stream => (
+                      <div
+                        key={stream.id}
+                        className="relative aspect-square w-full cursor-pointer rounded-lg overflow-hidden
+                                hover:ring-2 hover:ring-blue-500 transform hover:scale-[1.02] 
+                                transition-all duration-200 shadow-md"
+                        onClick={() => setSelectedStream(stream.id)}
+                      >
+                        <MediaStream
+                          mediaStream={stream.mediaStream}
+                          isMuted={stream.isMuted}
+                        />
+                        <div className="absolute bottom-2 left-2 text-xs bg-black/50 text-white px-2 py-1 rounded">
+                          {stream.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </>
