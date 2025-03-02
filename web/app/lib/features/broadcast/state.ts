@@ -5,6 +5,7 @@ import {
   not,
   setup,
   spawnChild,
+  stopChild,
 } from "xstate";
 import invariant from "tiny-invariant";
 import {
@@ -36,7 +37,9 @@ export type BroadcastMachineEvents =
   | { type: "broadcastVideo" }
   | { type: "poke" }
   | { type: "resume_remote_video"; sessionId: string; name: string }
-  | { type: "pause_remote_video"; sessionId: string; name: string };
+  | { type: "pause_remote_video"; sessionId: string; name: string }
+  | { type: "startScreenShare" }
+  | { type: "screenShareEnded" };
 
 export const broadcastMachine = setup({
   guards: {
@@ -64,6 +67,7 @@ export const broadcastMachine = setup({
   types: {
     context: {} as {
       localMediaStream: null | MediaStream;
+      localScreenShareStream: null | MediaStream;
       rtcPeerConnection: null | RTCPeerConnection;
       sessionIdentityToken: string | null;
       signaling: Signaling | null;
@@ -79,6 +83,25 @@ export const broadcastMachine = setup({
     events: {} as BroadcastMachineEvents,
   },
   actions: {
+    spawnListenerScreenShare: assign(({ context, spawn, self }) => {
+      const mediaStream = context.localScreenShareStream;
+
+      invariant(mediaStream, `Expected mediaStream to be defined`);
+
+      spawn("listenForScreenShareEnded", {
+        id: "listenForScreenShareEnded",
+        input: { screenShareMediaStream: mediaStream, parentMachine: self },
+      });
+
+      return context;
+    }),
+    stopListenerForScreenShare: stopChild("listenForScreenShareEnded"),
+
+    setLocalScreenShareStream: assign(
+      (_, { mediaStream }: { mediaStream: MediaStream | null }) => {
+        return { localScreenShareStream: mediaStream };
+      }
+    ),
     setEnabledToRemoteVideo: assign(
       (
         { context },
@@ -286,6 +309,60 @@ export const broadcastMachine = setup({
     },
   },
   actors: {
+    broadcastScreenShare: fromPromise(
+      async ({
+        input: { rtcPeerConnection, sessionIdentityToken },
+      }: {
+        input: {
+          rtcPeerConnection: RTCPeerConnection;
+          sessionIdentityToken: string;
+        };
+      }) => {
+        return await callsTracer.startActiveSpan(
+          "broadcastScreenShare",
+          async (ctx) => {
+            const screenShareStream =
+              await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+              });
+
+            const { sdp, tracks } = await addNewTransreciver({
+              ctx: makeParentSpanCtx(ctx),
+              mediaStream: screenShareStream,
+              rtcConnection: rtcPeerConnection,
+            });
+
+            const pushLocalTracksData = await pushLocalTracks({
+              ctx: makeParentSpanCtx(ctx),
+              sdp: sdp,
+              sessionIdentityToken: sessionIdentityToken,
+              tracks,
+            });
+
+            if (!pushLocalTracksData) {
+              throw new Error(
+                `Expected data to be returned from pushLocalTracks`
+              );
+            }
+
+            const answerSdp = pushLocalTracksData.sessionDescription?.sdp;
+
+            if (!answerSdp) {
+              throw new Error(`Expected answer sdp to be returned`);
+            }
+
+            await rtcPeerConnection.setRemoteDescription({
+              type: "answer",
+              sdp: answerSdp,
+            });
+
+            ctx.end();
+
+            return { screenShareStream };
+          }
+        );
+      }
+    ),
     getPermissionStatus: fromPromise(async () => {
       const cameraPermissionStatus = await navigator.permissions.query({
         name: "camera" as any,
@@ -309,6 +386,40 @@ export const broadcastMachine = setup({
 
       return mediaStream;
     }),
+
+    listenForScreenShareEnded: fromPromise(
+      async ({
+        input: { screenShareMediaStream, parentMachine },
+        signal,
+      }: {
+        input: {
+          screenShareMediaStream: MediaStream;
+          parentMachine: AnyActorRef;
+        };
+        signal: AbortSignal;
+      }) => {
+        function handleStreamEnded() {
+          console.log("Stream ended");
+          parentMachine.send({
+            type: "screenShareEnded",
+          } satisfies BroadcastMachineEvents);
+          console.log("Send screenShareEnded event");
+        }
+
+        const videoTrack = screenShareMediaStream.getVideoTracks()[0];
+
+        invariant(videoTrack, "Expected atleast one videoTrack");
+
+        videoTrack.addEventListener("ended", handleStreamEnded);
+
+        signal.onabort = () => {
+          console.log("Running listforScreenSharedEnded signal");
+          videoTrack.removeEventListener("ended", handleStreamEnded);
+        };
+
+        return new Promise((r) => {}); // Never resolve;
+      }
+    ),
 
     listenForNewRemoteTracks: fromPromise(
       async ({
@@ -611,6 +722,7 @@ export const broadcastMachine = setup({
     rtcPeerConnection: null,
     roomVersion: -Infinity,
     remoteMediaStreams: [],
+    localScreenShareStream: null,
   },
 
   states: {
@@ -802,6 +914,65 @@ export const broadcastMachine = setup({
                 broadcastVideo: {
                   actions: "toggleLocalVideo",
                   target: "broadcastVideo",
+                },
+              },
+            },
+          },
+        },
+        screenShareTracks: {
+          initial: "noScreenShare",
+          states: {
+            noScreenShare: {
+              on: {
+                startScreenShare: "askPermissionForScreenShare",
+              },
+            },
+            askPermissionForScreenShare: {
+              invoke: {
+                src: "broadcastScreenShare",
+                input({ context }) {
+                  const sessionIdentityToken = context.sessionIdentityToken;
+                  const rtcPeerConnection = context.rtcPeerConnection;
+
+                  invariant(
+                    sessionIdentityToken,
+                    `Expected sessionIdentityToken to be defined`
+                  );
+                  invariant(
+                    rtcPeerConnection,
+                    `Expected rtcPeerConnection to be defined`
+                  );
+
+                  return { rtcPeerConnection, sessionIdentityToken };
+                },
+                onDone: {
+                  actions: {
+                    type: "setLocalScreenShareStream",
+                    params({ event }) {
+                      const screenShareStream = event.output.screenShareStream;
+
+                      return { mediaStream: screenShareStream };
+                    },
+                  },
+                  target: "screenShare",
+                },
+                onError: {
+                  target: "noScreenShare",
+                },
+              },
+            },
+            screenShare: {
+              entry: ["spawnListenerScreenShare"],
+              exit: [
+                "stopListenerForScreenShare",
+                {
+                  type: "setLocalScreenShareStream",
+                  params: { mediaStream: null },
+                },
+              ],
+              on: {
+                screenShareEnded: {
+                  target: "noScreenShare",
                 },
               },
             },

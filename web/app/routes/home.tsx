@@ -86,6 +86,7 @@ function Broadcasting({
   const remoteMediaStreams = state.context.remoteMediaStreams;
   const rtcConnection = state.context.rtcPeerConnection;
   const signaling = state.context.signaling;
+  const screenShareStream = state.context.localScreenShareStream;
 
   // Check if video is enabled based on state machine
   const isVideoEnabled = state.matches({
@@ -124,7 +125,21 @@ function Broadcasting({
 
   return (
     <div className="flex flex-col h-full w-full">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 flex-grow">
+      {screenShareStream ? (
+        <div className="w-full p-4">
+          <div className="relative w-full" style={{ height: "40vh" }}>
+            <MediaStream mediaStream={screenShareStream} />
+            <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded">
+              <span>Your Screen</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <div
+        className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 flex-grow ${
+          screenShareStream ? "max-h-[40vh]" : ""
+        }`}
+      >
         <div className="relative">
           <MediaStream mediaStream={mediaStream} isMuted={!isVideoEnabled} />
           <div className="absolute bottom-2 left-2 text-sm bg-black/50 text-white px-2 py-1 rounded flex items-center gap-2">
@@ -165,6 +180,15 @@ function Broadcasting({
           }`}
         >
           {isVideoEnabled ? "🎥" : "🚫"}
+        </Button>
+        <Button
+          type="button"
+          onClick={() => send({ type: "startScreenShare" })}
+          className={`rounded-full w-12 h-12 flex items-center justify-center ${
+            screenShareStream ? "bg-blue-500 hover:bg-blue-600" : ""
+          }`}
+        >
+          📺
         </Button>
       </div>
     </div>
