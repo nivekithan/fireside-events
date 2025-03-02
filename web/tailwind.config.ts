@@ -5,6 +5,16 @@ export default {
   content: ["./app/**/{**,.client,.server}/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
+      keyframes: {
+        "ping-slow": {
+          "0%": { transform: "scale(1)", opacity: "0.8" },
+          "80%": { transform: "scale(1.8)", opacity: "0" },
+          "100%": { transform: "scale(2.2)", opacity: "0" },
+        },
+      },
+      animation: {
+        "ping-slow": "ping-slow 3s cubic-bezier(0, 0, 0.2, 1) infinite",
+      },
       fontFamily: {
         sans: [
           "Inter",
