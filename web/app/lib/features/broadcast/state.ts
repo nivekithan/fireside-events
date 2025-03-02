@@ -9,6 +9,7 @@ import {
 } from "xstate";
 import invariant from "tiny-invariant";
 import {
+  closeTracks,
   createNewSession,
   getOtherPeersLocalTracks,
   pushLocalTracks,
@@ -20,6 +21,7 @@ import { Signaling } from "./signaling";
 import { callsTracer, makeParentSpanCtx } from "~/lib/traces/trace.client";
 import { addNewTransreciver, createNewRtcConnection } from "./rtc";
 import { produce } from "immer";
+import { bk } from "../bk";
 
 export type BroadcastMachineEvents =
   | { type: "permissionGranted" }
@@ -67,7 +69,11 @@ export const broadcastMachine = setup({
   types: {
     context: {} as {
       localMediaStream: null | MediaStream;
-      localScreenShareStream: null | MediaStream;
+      localScreenShareStream: null | {
+        mediaStream: MediaStream;
+        name: string;
+        mid: string;
+      };
       rtcPeerConnection: null | RTCPeerConnection;
       sessionIdentityToken: string | null;
       signaling: Signaling | null;
@@ -98,7 +104,18 @@ export const broadcastMachine = setup({
     stopListenerForScreenShare: stopChild("listenForScreenShareEnded"),
 
     setLocalScreenShareStream: assign(
-      (_, { mediaStream }: { mediaStream: MediaStream | null }) => {
+      (
+        _,
+        {
+          mediaStream,
+        }: {
+          mediaStream: {
+            mediaStream: MediaStream;
+            name: string;
+            mid: string;
+          } | null;
+        }
+      ) => {
         return { localScreenShareStream: mediaStream };
       }
     ),
@@ -288,6 +305,7 @@ export const broadcastMachine = setup({
         return context;
       }
     ),
+
     stopTransrecvicer({ context }, mId: string) {
       const rtcPeerConnection = context.rtcPeerConnection;
 
@@ -306,6 +324,39 @@ export const broadcastMachine = setup({
 
       transreciver.stop();
       console.log(`Stopped transreciver with mId: ${mId}`);
+    },
+
+    closeScreenShareStream: async ({ context }) => {
+      return await callsTracer.startActiveSpan(
+        "closeScreenShareStream",
+        async (span) => {
+          const sessionIdentityToken = context.sessionIdentityToken;
+          const screenShareStream = context.localScreenShareStream;
+          const rtcPeerConnection = context.rtcPeerConnection;
+
+          invariant(
+            sessionIdentityToken,
+            `Expected sessionIdentityToken to be present`
+          );
+          invariant(
+            screenShareStream,
+            `Expected screenShareStream to be present`
+          );
+          invariant(
+            rtcPeerConnection,
+            `Expected rtcPeerConnection to be present`
+          );
+
+          const res = await closeTracks({
+            ctx: makeParentSpanCtx(span),
+            mid: screenShareStream.mid,
+            rtcPeerConnection,
+            sessionIdentityToken,
+          });
+
+          span.end();
+        }
+      );
     },
   },
   actors: {
@@ -351,6 +402,21 @@ export const broadcastMachine = setup({
               throw new Error(`Expected answer sdp to be returned`);
             }
 
+            const pushedScreenShareTrack = pushLocalTracksData.tracks?.[0];
+
+            invariant(
+              pushedScreenShareTrack,
+              `Expected pushedScreenShareTrack to be defined`
+            );
+
+            const mid = pushedScreenShareTrack.mid;
+            const trackName = pushedScreenShareTrack.trackName;
+
+            invariant(
+              mid && trackName,
+              `Expected pushedScreenShareTrack to be successfull`
+            );
+
             await rtcPeerConnection.setRemoteDescription({
               type: "answer",
               sdp: answerSdp,
@@ -358,7 +424,13 @@ export const broadcastMachine = setup({
 
             ctx.end();
 
-            return { screenShareStream };
+            return {
+              mediaStream: {
+                mediaStream: screenShareStream,
+                mid,
+                name: trackName,
+              },
+            };
           }
         );
       }
@@ -393,7 +465,11 @@ export const broadcastMachine = setup({
         signal,
       }: {
         input: {
-          screenShareMediaStream: MediaStream;
+          screenShareMediaStream: {
+            mediaStream: MediaStream;
+            name: string;
+            mid: string;
+          };
           parentMachine: AnyActorRef;
         };
         signal: AbortSignal;
@@ -406,7 +482,8 @@ export const broadcastMachine = setup({
           console.log("Send screenShareEnded event");
         }
 
-        const videoTrack = screenShareMediaStream.getVideoTracks()[0];
+        const videoTrack =
+          screenShareMediaStream.mediaStream.getVideoTracks()[0];
 
         invariant(videoTrack, "Expected atleast one videoTrack");
 
@@ -415,6 +492,8 @@ export const broadcastMachine = setup({
         signal.onabort = () => {
           console.log("Running listforScreenSharedEnded signal");
           videoTrack.removeEventListener("ended", handleStreamEnded);
+
+          const mid = screenShareMediaStream.mid;
         };
 
         return new Promise((r) => {}); // Never resolve;
@@ -949,7 +1028,7 @@ export const broadcastMachine = setup({
                   actions: {
                     type: "setLocalScreenShareStream",
                     params({ event }) {
-                      const screenShareStream = event.output.screenShareStream;
+                      const screenShareStream = event.output.mediaStream;
 
                       return { mediaStream: screenShareStream };
                     },
@@ -965,6 +1044,7 @@ export const broadcastMachine = setup({
               entry: ["spawnListenerScreenShare"],
               exit: [
                 "stopListenerForScreenShare",
+                "closeScreenShareStream",
                 {
                   type: "setLocalScreenShareStream",
                   params: { mediaStream: null },

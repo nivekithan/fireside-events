@@ -3,7 +3,7 @@ import migrations from '../../../../migrations/roomManager/migrations';
 import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import { RoomVersionTable, TracksTable } from './schema';
-import { eq, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { WithEnv } from '../../hono';
 import { Connection, Server, WSMessage } from 'partyserver';
 import { ClientSentMessage, ServerSentMessages } from 'signaling-messages';
@@ -13,6 +13,7 @@ import invariant from 'tiny-invariant';
 const LocalTracksSchema = z.object({
 	name: z.string(),
 	sessionId: z.string(),
+	mid: z.string(),
 });
 
 export type Tracks = z.infer<typeof LocalTracksSchema>;
@@ -63,11 +64,26 @@ export class RoomManager extends Server<Env> {
 			.insert(TracksTable)
 			.values(
 				tracks.map((t) => {
-					return { name: t.name, sessionId: t.sessionId };
+					return { name: t.name, sessionId: t.sessionId, mid: t.mid };
 				})
 			)
 			.run();
 		const newVersion = this.#increaseVersion();
+		this.#poke();
+
+		return { ok: true, version: newVersion };
+	}
+
+	async removeTrack(tracks: Array<{ sessionId: string; mid: string }>) {
+		tracks.map(({ mid, sessionId }) => {
+			this.#db
+				.delete(TracksTable)
+				.where(and(eq(TracksTable.mid, mid), eq(TracksTable.sessionId, sessionId)))
+				.run();
+		});
+
+		const newVersion = this.#increaseVersion();
+
 		this.#poke();
 
 		return { ok: true, version: newVersion };

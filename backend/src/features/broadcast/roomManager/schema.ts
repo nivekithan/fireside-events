@@ -6,9 +6,10 @@ export const TracksTable = sqliteTable(
 		id: integer().notNull().primaryKey({ autoIncrement: true }),
 		name: text().notNull(),
 		sessionId: text().notNull(),
+		mid: text().notNull(),
 	},
 	(t) => {
-		return [uniqueIndex('uniqie_name').on(t.name)];
+		return [uniqueIndex('uniqie_name').on(t.name), uniqueIndex('unqiue_mid_per_session').on(t.mid, t.sessionId)];
 	}
 );
 

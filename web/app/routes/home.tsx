@@ -86,7 +86,7 @@ function Broadcasting({
   const remoteMediaStreams = state.context.remoteMediaStreams;
   const rtcConnection = state.context.rtcPeerConnection;
   const signaling = state.context.signaling;
-  const screenShareStream = state.context.localScreenShareStream;
+  const screenShareStream = state.context.localScreenShareStream?.mediaStream;
 
   // Check if video is enabled based on state machine
   const isVideoEnabled = state.matches({

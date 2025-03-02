@@ -85,7 +85,7 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 					throw new Error('Invalid track data');
 				}
 
-				localTracksToBeAdded.push({ name, sessionId: callsSessionId });
+				localTracksToBeAdded.push({ name, sessionId: callsSessionId, mid });
 			}
 
 			// console.log({ countOfTracksToBeAdded: localTracksToBeAdded.length, tracks: tracks, responseFromCalls: response.data });
@@ -146,7 +146,7 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 		async (c) => {
 			const sessionIdentityToken = c.req.valid('header')['x-session-identity-token'];
 
-			const { callsSessionId } = await verifySessionIdentiyToken({
+			const { callsSessionId, room } = await verifySessionIdentiyToken({
 				jwtSecret: c.env.JWT_SECRET,
 				token: sessionIdentityToken,
 			});
@@ -166,6 +166,25 @@ export const CallsProxyRouter = new Hono<{ Bindings: Env }>()
 			});
 
 			console.log(`Close tracks response: ${JSON.stringify(response, null, 2)}`);
+
+			const successfullyRemovedTracks =
+				response.data?.tracks
+					?.map((t) => {
+						if (!t.mid) {
+							return null;
+						}
+
+						const mid = t.mid;
+
+						return mid;
+					})
+					.filter(Boolean) || [];
+
+			if (successfullyRemovedTracks.length) {
+				const roomManager = await getRoomManager({ env: c.env, roomName: room });
+				roomManager.removeTrack(successfullyRemovedTracks.map((t) => ({ mid: t, sessionId: callsSessionId })));
+			}
+
 			return c.json({ data: response.data, error: response.error as { errorCode: string; errorDescription: string } | undefined });
 		}
 	)

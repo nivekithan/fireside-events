@@ -7,6 +7,7 @@ import {
 import { bk } from "../bk";
 import { getPublicId } from "../identity";
 import { SpanStatusCode } from "@opentelemetry/api";
+import invariant from "tiny-invariant";
 
 export async function pushRemoteTracks({
   sessionIdentityToken,
@@ -282,6 +283,76 @@ export async function renegotiateSession({
     console.log(`Regneotiate Respone data`, regenotiateData);
 
     return regenotiateData;
+  } finally {
+    span.end();
+  }
+}
+
+export async function closeTracks({
+  mid,
+  sessionIdentityToken,
+  ctx,
+  rtcPeerConnection,
+}: WithContext<{
+  mid: string;
+  sessionIdentityToken: string;
+  rtcPeerConnection: RTCPeerConnection;
+}>) {
+  const span = callsTracer.startSpan("closeTracks", undefined, ctx);
+
+  try {
+    span.setAttribute("sessionIdentityToken", sessionIdentityToken);
+    span.setAttribute("mid", mid);
+
+    const transreciver = rtcPeerConnection
+      .getTransceivers()
+      .find((t) => t.mid === mid);
+
+    if (!transreciver) {
+      throw new Error(`Unable to find an transreciver with mid: ${mid}`);
+    }
+
+    transreciver.stop();
+
+    const newOffer = await rtcPeerConnection.createOffer();
+
+    invariant(newOffer.sdp, "Expected sdp to be defined");
+
+    await rtcPeerConnection.setLocalDescription(newOffer);
+
+    const res = await bk.calls.tracks.close.$put({
+      header: { "x-session-identity-token": sessionIdentityToken },
+      json: {
+        sessionDescription: { type: "offer", sdp: newOffer.sdp },
+        tracks: [{ mid: mid }],
+      },
+    });
+
+    const payload = await res.json();
+
+    console.log({
+      closeTracksRequiresImmediateRegnenotiation:
+        payload.data?.requiresImmediateRenegotiation,
+    });
+
+    if (payload.error) {
+      throw new Error(
+        `[ERROR closeTracks error: [${payload.error.errorCode}]: ${payload.error.errorDescription}`
+      );
+    }
+
+    const answerSdp = payload.data?.sessionDescription;
+
+    invariant(answerSdp, `Expected answer sdp to be present`);
+
+    invariant(answerSdp.type, `Expected answerSdp.type to be present`);
+
+    await rtcPeerConnection.setRemoteDescription({
+      type: answerSdp.type,
+      sdp: answerSdp.sdp,
+    });
+
+    return { answerSdp };
   } finally {
     span.end();
   }
