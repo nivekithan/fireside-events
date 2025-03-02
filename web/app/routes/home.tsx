@@ -20,78 +20,82 @@ export function clientLoader({}: Route.ClientLoaderArgs) {
 }
 
 export default function Component({}: Route.ComponentProps) {
-  const [snapshot] = useMachine(broadcastMachine);
+  const [state, send] = useMachine(broadcastMachine);
 
-  if (snapshot.matches("determiningPermission")) {
-    return <Layout roomVersion={snapshot.context.roomVersion}>{null}</Layout>;
-  } else if (snapshot.matches("permissionDenied")) {
+  if (state.matches("determiningPermission")) {
+    return <Layout roomVersion={state.context.roomVersion}>{null}</Layout>;
+  } else if (state.matches("permissionDenied")) {
     return (
-      <Layout roomVersion={snapshot.context.roomVersion}>
+      <Layout roomVersion={state.context.roomVersion}>
         <Notify
           title="Permission Denied"
           description="Enable Permission by going to site settings"
         />
       </Layout>
     );
-  } else if (snapshot.matches("permissionGranted")) {
+  } else if (state.matches("permissionGranted")) {
     return (
-      <Layout roomVersion={snapshot.context.roomVersion}>
+      <Layout roomVersion={state.context.roomVersion}>
         <Spinner />
       </Layout>
     );
-  } else if (snapshot.matches("permissionPending")) {
+  } else if (state.matches("permissionPending")) {
     return (
-      <Layout roomVersion={snapshot.context.roomVersion}>
+      <Layout roomVersion={state.context.roomVersion}>
         <Notify
           title="Permission Pending"
           description="Accept permission to share your webcam to continue using the site"
         />
       </Layout>
     );
-  } else if (snapshot.matches("unableToDeterminePermission")) {
+  } else if (state.matches("unableToDeterminePermission")) {
     return (
-      <Layout roomVersion={snapshot.context.roomVersion}>
+      <Layout roomVersion={state.context.roomVersion}>
         <Notify
           title="Permission unable to determine"
           description="Try reloading the page or give permission manually by going to site settings"
         />
       </Layout>
     );
-  } else if (snapshot.matches("unableToGetMediaStream")) {
+  } else if (state.matches("unableToGetMediaStream")) {
     return (
-      <Layout roomVersion={snapshot.context.roomVersion}>
+      <Layout roomVersion={state.context.roomVersion}>
         <Notify
           title="Error!"
           description="We are unable to load your webcam"
         />
       </Layout>
     );
-  } else if (snapshot.matches("broadcasting")) {
+  } else if (state.matches("broadcasting")) {
     return (
-      <Layout roomVersion={snapshot.context.roomVersion}>
-        <Broadcasting snapshot={snapshot} />
+      <Layout roomVersion={state.context.roomVersion}>
+        <Broadcasting state={state} send={send} />
       </Layout>
     );
   }
 }
 
 function Broadcasting({
-  snapshot,
+  state,
+  send,
 }: React.PropsWithoutRef<{
-  snapshot: ReturnType<typeof broadcastMachine.getInitialSnapshot>;
+  state: ReturnType<typeof broadcastMachine.getInitialSnapshot>;
+  send: (event: any) => void;
 }>) {
-  const mediaStream = snapshot.context.localMediaStream;
-  const remoteMediaStreams = snapshot.context.remoteMediaStreams;
-  const rtcConnection = snapshot.context.rtcPeerConnection;
-  const signaling = snapshot.context.signaling;
-  const [videoEnabled, setVideoEnabled] = React.useState(true);
+  const mediaStream = state.context.localMediaStream;
+  const remoteMediaStreams = state.context.remoteMediaStreams;
+  const rtcConnection = state.context.rtcPeerConnection;
+  const signaling = state.context.signaling;
+  
+  // Check if video is enabled based on state machine
+  const isVideoEnabled = state.matches({ broadcasting: { localTracks: "broadcastVideo" } });
 
   useEffect(() => {
     console.log({
       rtcConnection,
       remoteMediaStreams,
       mediaStream,
-      snapshot,
+      state,
     });
     const interval = setInterval(() => {
       const transceivers = rtcConnection?.getTransceivers();
@@ -100,7 +104,7 @@ function Broadcasting({
         remoteMediaStreams,
         mediaStream,
         transceivers,
-        snapshot,
+        state,
         signalingVersion: signaling?.version,
         signalingSyncedTracks: signaling?.syncedTracks,
       });
@@ -109,30 +113,16 @@ function Broadcasting({
     return () => {
       clearInterval(interval);
     };
-  }, [mediaStream, remoteMediaStreams, rtcConnection, snapshot, signaling]);
+  }, [mediaStream, remoteMediaStreams, rtcConnection, state, signaling]);
 
   invariant(mediaStream, `Expected context.localMediaStream to be not null`);
 
   function toggleVideoSharing() {
-    if (!rtcConnection) {
-      return;
+    if (isVideoEnabled) {
+      send({ type: "pauseVideo" });
+    } else {
+      send({ type: "broadcastVideo" });
     }
-
-    rtcConnection.getTransceivers().forEach((t) => {
-      const isSender = t.direction === "sendonly";
-
-      if (!isSender) {
-        return;
-      }
-
-      if (!t.sender.track) {
-        return;
-      }
-
-      t.sender.track.enabled = !t.sender.track.enabled;
-    });
-    
-    setVideoEnabled(!videoEnabled);
   }
 
   return (
@@ -163,9 +153,9 @@ function Broadcasting({
         <Button 
           type="button" 
           onClick={toggleVideoSharing}
-          className={`rounded-full w-12 h-12 flex items-center justify-center ${!videoEnabled ? 'bg-red-500 hover:bg-red-600' : ''}`}
+          className={`rounded-full w-12 h-12 flex items-center justify-center ${!isVideoEnabled ? 'bg-red-500 hover:bg-red-600' : ''}`}
         >
-          {videoEnabled ? '🎥' : '🚫'}
+          {isVideoEnabled ? '🎥' : '🚫'}
         </Button>
       </div>
     </div>
