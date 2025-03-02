@@ -1,0 +1,1 @@
+ALTER TABLE `tracks` DROP COLUMN `is_screen_share`;

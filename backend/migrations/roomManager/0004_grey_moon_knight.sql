@@ -1,0 +1,1 @@
+ALTER TABLE `tracks` ADD `is_screen_share` integer NOT NULL;

@@ -387,7 +387,7 @@ export const broadcastMachine = setup({
               ctx: makeParentSpanCtx(ctx),
               sdp: sdp,
               sessionIdentityToken: sessionIdentityToken,
-              tracks,
+              tracks: tracks,
             });
 
             if (!pushLocalTracksData) {
@@ -627,7 +627,7 @@ export const broadcastMachine = setup({
             const pushLocalTracksData = await pushLocalTracks({
               sdp,
               sessionIdentityToken,
-              tracks,
+              tracks: tracks,
               ctx,
             });
 
