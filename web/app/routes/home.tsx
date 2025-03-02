@@ -36,7 +36,11 @@ export default function Component({}: Route.ComponentProps) {
   } else if (state.matches("permissionGranted")) {
     return (
       <Layout roomVersion={state.context.roomVersion}>
-        <Spinner />
+        <div className="h-full w-full flex items-center justify-center">
+          <Spinner size="large">
+            <div className="mt-4 text-white font-medium">Setting up your camera...</div>
+          </Spinner>
+        </div>
       </Layout>
     );
   } else if (state.matches("permissionPending")) {
@@ -46,6 +50,16 @@ export default function Component({}: Route.ComponentProps) {
           title="Permission Pending"
           description="Accept permission to share your webcam to continue using the site"
         />
+      </Layout>
+    );
+  } else if (state.matches("joiningRoom")) {
+    return (
+      <Layout roomVersion={state.context.roomVersion}>
+        <div className="h-full w-full flex items-center justify-center">
+          <Spinner size="large">
+            <div className="mt-4 text-white font-medium">Joining room, please wait...</div>
+          </Spinner>
+        </div>
       </Layout>
     );
   } else if (state.matches("unableToDeterminePermission")) {
@@ -315,14 +329,29 @@ function MediaStream({
   isMuted?: boolean;
 }) {
   const videoEleRef = useRef<HTMLVideoElement | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState(false);
 
   useEffect(() => {
     if (!videoEleRef.current) {
       return;
     }
 
+    // Reset loading state when media stream changes
+    setIsLoading(true);
+    setLoadError(false);
+    
     videoEleRef.current.srcObject = mediaStream;
   }, [mediaStream]);
+
+  const handleCanPlay = () => {
+    setIsLoading(false);
+  };
+
+  const handleError = () => {
+    setIsLoading(false);
+    setLoadError(true);
+  };
 
   return (
     <div className="relative w-full h-full">
@@ -331,8 +360,29 @@ function MediaStream({
         autoPlay
         playsInline
         muted
-        className="w-full h-full object-cover bg-gray-900 rounded-lg shadow-md"
+        className={`w-full h-full object-cover bg-gray-900 rounded-lg shadow-md ${
+          isLoading ? "opacity-0" : "opacity-100"
+        } transition-opacity duration-300`}
+        onCanPlay={handleCanPlay}
+        onError={handleError}
       />
+      
+      {/* Show loading spinner while video is initializing */}
+      {isLoading && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 rounded-lg">
+          <Spinner size="medium">
+            <div className="mt-3 text-white text-sm">Connecting video...</div>
+          </Spinner>
+        </div>
+      )}
+      
+      {/* Show error message if video fails to load */}
+      {loadError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 rounded-lg">
+          <div className="text-red-500">Failed to load video</div>
+        </div>
+      )}
+      
       {isMuted && (
         <div className="absolute inset-0">
           <AnimatedAvatar />
